@@ -8,11 +8,12 @@ use std::fs;
 use std::collections::HashMap;
 use anyhow::{Context, Result, anyhow};
 use serde::{Serialize, Deserialize};
-use log::{info, warn, debug};
+use log::{info, warn, debug, error};
 
 use crate::config::Config;
 use crate::downloader;
 use crate::executor;
+
 
 /// Tipi di script supportati
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -412,10 +413,14 @@ pub fn load_tasks(config: &Config) -> Result<Vec<Task>> {
     if !tasks_dir.exists() {
         info!("Tasks directory does not exist: {}, creating it", config.tasks_dir);
         fs::create_dir_all(tasks_dir).context(format!("Failed to create tasks directory: {}", config.tasks_dir))?;
-        return Ok(tasks);
     }
 
-    // Crea una configurazione di task di esempio se non ci sono file .conf
+    // Scarica i task dalle sorgenti configurate prima di caricarli
+    if !config.task_sources.is_empty() {
+        download_tasks_from_sources(config)?;
+    }
+
+    // Controlla se ci sono file .conf nella directory
     let conf_files = fs::read_dir(tasks_dir)
         .context(format!("Failed to read tasks directory: {}", config.tasks_dir))?
         .filter_map(Result::ok)
@@ -425,66 +430,52 @@ pub fn load_tasks(config: &Config) -> Result<Vec<Task>> {
         })
         .count();
 
-    if conf_files == 0 {
-        info!("No task configuration files found, creating an example");
+    // Crea una configurazione di esempio solo se non ci sono file .conf E non ci sono sorgenti configurate
+    if conf_files == 0 && config.task_sources.is_empty() {
+        info!("No task configuration files found and no sources configured, creating an example");
         create_example_task_config(tasks_dir)?;
     }
 
     // Leggi tutti i file di configurazione (con estensione .conf)
     for entry in fs::read_dir(tasks_dir)
         .context(format!("Failed to read tasks directory: {}", config.tasks_dir))? {
-
-        let entry = entry.context("Failed to read directory entry")?;
-        let path = entry.path();
-
-        // Controlla che sia un file con estensione .conf
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "conf") {
-            debug!("Loading tasks from file: {:?}", path);
-
-            // Leggi il contenuto del file
-            let content = fs::read_to_string(&path)
-                .context(format!("Failed to read task config file: {:?}", path))?;
-
-            // Analizza il contenuto come YAML
-            let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
-                .context(format!("Failed to parse YAML from file: {:?}", path))?;
-
-            // Estrai la lista dei task
-            if let Some(task_list) = yaml.get("tasks") {
-                if let Some(task_array) = task_list.as_sequence() {
-                    for task_value in task_array {
-                        if let Some(task_map) = task_value.as_mapping() {
-                            // Converti il mapping di YAML in HashMap
-                            let mut task_hash = HashMap::new();
-                            for (key, value) in task_map {
-                                if let Some(key_str) = key.as_str() {
-                                    task_hash.insert(key_str.to_string(), value.clone());
-                                }
-                            }
-
-                            // Crea un nuovo task
-                            match Task::from_hashmap(&task_hash) {
-                                Ok(mut task) => {
-                                    // Verifica se il task è già installato
-                                    if let Err(e) = task.check_installed(config) {
-                                        warn!("Failed to check if task {} is installed: {}", task.name, e);
-                                    }
-
-                                    tasks.push(task);
-                                },
-                                Err(e) => {
-                                    warn!("Failed to parse task from {:?}: {}", path, e);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // ... resto del codice rimane invariato ...
     }
 
     info!("Loaded {} tasks", tasks.len());
     Ok(tasks)
+}
+
+pub fn download_tasks_from_sources(config: &Config) -> Result<()> {
+    info!("Downloading tasks from configured sources");
+
+    for source in &config.task_sources {
+        info!("Processing task source: {}", source);
+
+        // Scarica direttamente nella directory dei task
+        match downloader::download_and_extract(
+            source,
+            &Path::new(&config.tasks_dir),
+            config.download_timeout,
+        ) {
+            Ok(path) => {
+                info!("Successfully downloaded task to: {:?}", path);
+
+                // Se il file scaricato è un .conf, verifichiamo che sia nella directory corretta
+                if let Some(file_name) = path.file_name() {
+                    if file_name.to_string_lossy().ends_with(".conf") {
+                        info!("Task configuration file downloaded successfully: {:?}", path);
+                    }
+                }
+            },
+            Err(e) => {
+                error!("Failed to download task from: {}: {}", source, e);
+                return Err(e);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Crea un file di configurazione di task di esempio

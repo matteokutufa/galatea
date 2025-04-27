@@ -230,34 +230,93 @@ fn extract_tar_gz(archive_path: &Path, extract_dir: &Path) -> Result<()> {
 /// # Returns
 ///
 /// Il percorso della directory in cui è stato estratto il file o l'archivio
+/// Scarica e decomprime solo se è un archivio, altrimenti copia il file
 pub fn download_and_extract(url: &str, extract_dir: &Path, timeout_secs: u64) -> Result<PathBuf> {
+    info!("Starting download_and_extract for URL: {}", url);
+    info!("Extract directory: {:?}", extract_dir);
+
     // Crea una directory temporanea per il download
     let temp_dir = extract_dir.join("temp");
     if !temp_dir.exists() {
+        info!("Creating temp directory: {:?}", temp_dir);
         fs::create_dir_all(&temp_dir).context("Failed to create temp directory")?;
     }
 
     // Scarica il file
+    info!("Downloading file...");
     let downloaded_file = download_file(url, &temp_dir, timeout_secs)?;
+    info!("File downloaded to: {:?}", downloaded_file);
 
-    // Estrai l'archivio
+    // Verifica se il file è un archivio
+    let file_name = downloaded_file.file_name()
+        .ok_or_else(|| anyhow!("Invalid file path"))?
+        .to_string_lossy();
+    info!("Downloaded file name: {}", file_name);
+
+    // Se il file ha estensione .conf, copialo direttamente nella directory di destinazione
+    if file_name.ends_with(".conf") {
+        let dest_path = extract_dir.join(file_name.to_string());
+        info!("Copying config file from {:?} to: {:?}", downloaded_file, dest_path);
+
+        // Assicurati che la directory di destinazione esista
+        if let Some(parent) = dest_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)
+                    .context(format!("Failed to create directory: {:?}", parent))?;
+            }
+        }
+
+        fs::copy(&downloaded_file, &dest_path)
+            .context(format!("Failed to copy config file to {:?}", dest_path))?;
+
+        // Rimuovi il file scaricato nella directory temporanea
+        if downloaded_file.exists() {
+            if let Err(e) = fs::remove_file(&downloaded_file) {
+                warn!("Failed to remove temporary file {:?}: {}", downloaded_file, e);
+            }
+        }
+
+        // Rimuovi la directory temporanea se è vuota
+        if temp_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&temp_dir) {
+                if entries.count() == 0 {
+                    if let Err(e) = fs::remove_dir(&temp_dir) {
+                        warn!("Failed to remove empty temporary directory {:?}: {}", temp_dir, e);
+                    }
+                }
+            }
+        }
+
+        info!("Config file successfully copied to: {:?}", dest_path);
+        return Ok(dest_path);
+    }
+
+    // Se è un archivio, estrai nella directory principale (non in temp)
+    info!("Extracting archive...");
     let extracted_dir = extract_archive(&downloaded_file, extract_dir)?;
+    info!("Archive extracted to: {:?}", extracted_dir);
 
-    // Rimuovi il file scaricato e la directory temporanea
+    // Rimuovi il file scaricato nella directory temporanea
     if downloaded_file.exists() {
         if let Err(e) = fs::remove_file(&downloaded_file) {
             warn!("Failed to remove temporary file {:?}: {}", downloaded_file, e);
         }
     }
 
+    // Rimuovi la directory temporanea se è vuota
     if temp_dir.exists() {
-        if let Err(e) = fs::remove_dir_all(&temp_dir) {
-            warn!("Failed to remove temporary directory {:?}: {}", temp_dir, e);
+        if let Ok(entries) = fs::read_dir(&temp_dir) {
+            if entries.count() == 0 {
+                if let Err(e) = fs::remove_dir(&temp_dir) {
+                    warn!("Failed to remove empty temporary directory {:?}: {}", temp_dir, e);
+                }
+            }
         }
     }
 
     Ok(extracted_dir)
 }
+
 
 /// Legge un file e restituisce il suo contenuto come stringa
 ///
@@ -295,3 +354,4 @@ pub fn write_string_to_file(path: &Path, content: &str) -> Result<()> {
     fs::write(path, content)
         .context(format!("Failed to write file: {:?}", path))
 }
+

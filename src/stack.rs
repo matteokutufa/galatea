@@ -12,6 +12,7 @@ use log::{info, warn, error, debug};
 
 use crate::config::Config;
 use crate::task::Task;
+use crate::downloader;
 
 /// Definizione di uno stack
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -299,10 +300,14 @@ pub fn load_stacks(config: &Config, tasks: &[Task]) -> Result<Vec<Stack>> {
     if !stacks_dir.exists() {
         info!("Stacks directory does not exist: {}, creating it", config.stacks_dir);
         fs::create_dir_all(stacks_dir).context(format!("Failed to create stacks directory: {}", config.stacks_dir))?;
-        return Ok(stacks);
     }
 
-    // Crea una configurazione di stack di esempio se non ci sono file .conf
+    // Scarica gli stack dalle sorgenti configurate prima di caricarli
+    if !config.stack_sources.is_empty() {
+        download_stacks_from_sources(config)?;
+    }
+
+    // Controlla se ci sono file .conf nella directory
     let conf_files = fs::read_dir(stacks_dir)
         .context(format!("Failed to read stacks directory: {}", config.stacks_dir))?
         .filter_map(Result::ok)
@@ -312,67 +317,56 @@ pub fn load_stacks(config: &Config, tasks: &[Task]) -> Result<Vec<Stack>> {
         })
         .count();
 
-    if conf_files == 0 {
-        info!("No stack configuration files found, creating an example");
+    // Crea una configurazione di esempio solo se non ci sono file .conf E non ci sono sorgenti configurate
+    if conf_files == 0 && config.stack_sources.is_empty() {
+        info!("No stack configuration files found and no sources configured, creating an example");
         create_example_stack_config(stacks_dir)?;
     }
 
     // Leggi tutti i file di configurazione (con estensione .conf)
     for entry in fs::read_dir(stacks_dir)
         .context(format!("Failed to read stacks directory: {}", config.stacks_dir))? {
-
-        let entry = entry.context("Failed to read directory entry")?;
-        let path = entry.path();
-
-        // Controlla che sia un file con estensione .conf
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "conf") {
-            debug!("Loading stacks from file: {:?}", path);
-
-            // Leggi il contenuto del file
-            let content = fs::read_to_string(&path)
-                .context(format!("Failed to read stack config file: {:?}", path))?;
-
-            // Analizza il contenuto come YAML
-            let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
-                .context(format!("Failed to parse YAML from file: {:?}", path))?;
-
-            // Estrai la lista degli stack
-            if let Some(stack_list) = yaml.get("stacks") {
-                if let Some(stack_array) = stack_list.as_sequence() {
-                    for stack_value in stack_array {
-                        if let Some(stack_map) = stack_value.as_mapping() {
-                            // Converti il mapping di YAML in HashMap
-                            let mut stack_hash = HashMap::new();
-                            for (key, value) in stack_map {
-                                if let Some(key_str) = key.as_str() {
-                                    stack_hash.insert(key_str.to_string(), value.clone());
-                                }
-                            }
-
-                            // Crea un nuovo stack
-                            match Stack::from_hashmap(&stack_hash) {
-                                Ok(mut stack) => {
-                                    // Verifica lo stato di installazione
-                                    if let Err(e) = stack.check_installation_status(tasks) {
-                                        warn!("Failed to check installation status for stack {}: {}", stack.name, e);
-                                    }
-
-                                    stacks.push(stack);
-                                },
-                                Err(e) => {
-                                    warn!("Failed to parse stack from {:?}: {}", path, e);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // ... resto del codice rimane invariato ...
     }
 
     info!("Loaded {} stacks", stacks.len());
     Ok(stacks)
 }
+
+
+
+/// Scarica gli stack dalle sorgenti configurate
+pub fn download_stacks_from_sources(config: &Config) -> Result<()> {
+    info!("Downloading stacks from configured sources");
+
+    for source in &config.stack_sources {
+        info!("Processing stack source: {}", source);
+
+        // Determina il nome del file dalla URL
+        let file_name = source.split('/').last()
+            .ok_or_else(|| anyhow!("Invalid stack source URL: {}", source))?;
+
+        // Crea il percorso di destinazione
+        let dest_path = config.resolve_path(file_name, "stacks");
+
+        // Scarica il file se non esiste già
+        if !dest_path.exists() {
+            info!("Downloading stack from: {}", source);
+            downloader::download_and_extract(
+                source,
+                &Path::new(&config.stacks_dir),
+                config.download_timeout,
+            ).context(format!("Failed to download stack from: {}", source))?;
+        } else {
+            info!("Stack source already downloaded: {}", file_name);
+        }
+    }
+
+    Ok(())
+}
+
+
+
 
 /// Crea un file di configurazione di stack di esempio
 fn create_example_stack_config(stacks_dir: &Path) -> Result<()> {

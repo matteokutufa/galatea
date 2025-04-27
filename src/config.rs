@@ -56,6 +56,11 @@ impl Config {
         }
     }
 
+    /// Verifica se ci sono sorgenti configurate per task o stack
+    pub fn has_sources(&self) -> bool {
+        !self.task_sources.is_empty() || !self.stack_sources.is_empty()
+    }
+
     /// Carica la configurazione da un file
     pub fn load(path: Option<&str>) -> Result<Self> {
         let mut conf = ConfuciusConfig::new("galatea");
