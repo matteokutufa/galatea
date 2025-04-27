@@ -9,12 +9,11 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use anyhow::{Context, Result, anyhow};
 use serde::{Serialize, Deserialize};
-use log::{info, warn, debug, error};
+use log::{info, warn, error};
 
 use crate::config::Config;
 use crate::downloader;
 use crate::executor;
-use crate::stack::Stack;
 
 /// Tipi di script supportati
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

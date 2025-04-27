@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use anyhow::{Context, Result, anyhow};
 use serde::{Serialize, Deserialize};
-use log::{info, warn, error, debug};
+use log::{info, warn, error};
 
 use crate::config::Config;
 use crate::task::Task;
