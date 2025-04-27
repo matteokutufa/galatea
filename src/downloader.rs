@@ -5,10 +5,10 @@
 
 use std::path::{Path, PathBuf};
 use std::fs::{self, File};
-use std::io::{self, Read, Write, copy};
+use std::io::{copy};
 use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
-use log::{info, warn, error, debug};
+use log::{info, warn, debug};
 use reqwest::blocking::Client;
 use zip::ZipArchive;
 use tar::Archive;

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::fs;
 use anyhow::{Context, Result, anyhow};
-use log::{info, warn, error, debug};
+use log::info;
 
 /// Esegue un comando generico
 ///

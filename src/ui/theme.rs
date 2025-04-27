@@ -3,8 +3,6 @@
 //! Questo modulo fornisce la personalizzazione dell'aspetto dell'interfaccia utente.
 
 use cursive::theme::{BorderStyle, Palette, PaletteColor, Theme, Color, BaseColor};
-use cursive::theme;
-use std::collections::HashMap;
 
 /// Ottiene un tema di default per l'applicazione
 pub fn default_theme() -> Theme {

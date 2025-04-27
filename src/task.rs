@@ -8,7 +8,7 @@ use std::fs;
 use std::collections::HashMap;
 use anyhow::{Context, Result, anyhow};
 use serde::{Serialize, Deserialize};
-use log::{info, warn, error, debug};
+use log::{info, warn, debug};
 
 use crate::config::Config;
 use crate::downloader;

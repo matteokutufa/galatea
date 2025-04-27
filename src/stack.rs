@@ -3,7 +3,7 @@
 //! Questo modulo definisce la struttura e le operazioni sugli stack, che sono
 //! raccolte di task che possono essere eseguiti insieme.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::fs;
 use std::collections::HashMap;
 use anyhow::{Context, Result, anyhow};
@@ -11,7 +11,7 @@ use serde::{Serialize, Deserialize};
 use log::{info, warn, error, debug};
 
 use crate::config::Config;
-use crate::task::{Task, load_tasks};
+use crate::task::Task;
 
 /// Definizione di uno stack
 #[derive(Debug, Clone, Serialize, Deserialize)]

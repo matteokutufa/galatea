@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use log::info;
 
 use cursive::Cursive;
 use cursive::views::{Dialog, TextView, LinearLayout, SelectView, DummyView, Panel, EditView};

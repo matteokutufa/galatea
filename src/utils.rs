@@ -7,7 +7,7 @@ use std::fs;
 use std::process::Command;
 use std::env;
 use anyhow::{Context, Result, anyhow};
-use log::{info, warn, error, debug};
+use log::error;
 
 /// Verifica se l'applicazione è in esecuzione con privilegi di root
 ///
