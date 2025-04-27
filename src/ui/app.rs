@@ -3,20 +3,19 @@
 //! Questo modulo gestisce l'interfaccia utente testuale principale dell'applicazione.
 
 use std::sync::{Arc, Mutex};
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::path::PathBuf;
 
-use anyhow::{Context, Result, anyhow};
-use log::{info, warn, error, debug};
+use anyhow::{Result, anyhow};
+use log::info;
 
 use cursive::Cursive;
-use cursive::views::{Dialog, TextView, LinearLayout, SelectView, DummyView, Panel, TextContent, EditView};
+use cursive::views::{Dialog, TextView, LinearLayout, SelectView, DummyView, Panel, EditView};
 use cursive::view::Scrollable;
 use cursive::traits::*;
 use cursive::align::HAlign;
 
-use crate::config::Config;
-use crate::task::{Task, load_tasks};
+use crate::config::{Config, get_default_config_path};
+use crate::task::{Task, load_tasks, ScriptType};
 use crate::stack::{Stack, load_stacks};
 use crate::ui::theme;
 use crate::ui::task_view;
@@ -160,13 +159,21 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
     content.push_str(&format!("Tema UI: {}\n", config_guard.ui_theme));
     content.push_str("\nSorgenti Task:\n");
 
-    for (i, url) in config_guard.task_sources.iter().enumerate() {
-        content.push_str(&format!("  {}. {}\n", i + 1, url));
+    if config_guard.task_sources.is_empty() {
+        content.push_str("  Nessuna sorgente di task configurata\n");
+    } else {
+        for (i, url) in config_guard.task_sources.iter().enumerate() {
+            content.push_str(&format!("  {}. {}\n", i + 1, url));
+        }
     }
 
     content.push_str("\nSorgenti Stack:\n");
-    for (i, url) in config_guard.stack_sources.iter().enumerate() {
-        content.push_str(&format!("  {}. {}\n", i + 1, url));
+    if config_guard.stack_sources.is_empty() {
+        content.push_str("  Nessuna sorgente di stack configurata\n");
+    } else {
+        for (i, url) in config_guard.stack_sources.iter().enumerate() {
+            content.push_str(&format!("  {}. {}\n", i + 1, url));
+        }
     }
 
     // Lista dei temi disponibili
@@ -174,6 +181,16 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
     for theme_name in theme::get_available_themes() {
         content.push_str(&format!("  - {}\n", theme_name));
     }
+
+    // Informazioni sulla configurazione
+    if let Some(config_path) = &config_guard.config_file_path {
+        content.push_str(&format!("\nFile di configurazione: {:?}\n", config_path));
+    } else {
+        content.push_str("\nFile di configurazione: usando valori predefiniti\n");
+    }
+
+    // Rilascia il lock prima di procedere
+    drop(config_guard);
 
     // Aggiungi la vista alla UI
     siv.add_layer(Dialog::around(TextView::new(content).scrollable())
@@ -196,6 +213,17 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                     {
                         let mut config_guard = config_clone.lock().unwrap();
                         config_guard.ui_theme = theme_name.to_string();
+
+                        // Salva la configurazione aggiornata
+                        if let Some(config_path) = &config_guard.config_file_path {
+                            match config_guard.save(&config_path.to_string_lossy()) {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e)));
+                                    return;
+                                }
+                            }
+                        }
                     }
 
                     // Imposta il nuovo tema
@@ -237,12 +265,25 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                                 return;
                             }
 
-                            // Add the source
+                            // Aggiungi la sorgente e salva la configurazione
                             {
                                 let mut config_guard = config.lock().unwrap();
                                 if config_guard.add_task_source(&url) {
-                                    s.pop_layer();
-                                    s.add_layer(Dialog::info(format!("Sorgente Task aggiunta: {}", url)));
+                                    // Salva la configurazione aggiornata
+                                    if let Some(config_path) = &config_guard.config_file_path {
+                                        match config_guard.save(&config_path.to_string_lossy()) {
+                                            Ok(_) => {
+                                                s.pop_layer();
+                                                s.add_layer(Dialog::info(format!("Sorgente Task aggiunta: {}", url)));
+                                            },
+                                            Err(e) => {
+                                                s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e)));
+                                            }
+                                        }
+                                    } else {
+                                        s.pop_layer();
+                                        s.add_layer(Dialog::info(format!("Sorgente Task aggiunta: {}", url)));
+                                    }
                                 } else {
                                     s.add_layer(Dialog::info(format!("La sorgente {} esiste già", url)));
                                 }
@@ -275,14 +316,85 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                                 return;
                             }
 
-                            // Aggiungi la sorgente
+                            // Aggiungi la sorgente e salva la configurazione
                             {
                                 let mut config_guard = config.lock().unwrap();
                                 if config_guard.add_stack_source(&url) {
-                                    s.pop_layer();
-                                    s.add_layer(Dialog::info(format!("Sorgente Stack aggiunta: {}", url)));
+                                    // Salva la configurazione aggiornata
+                                    if let Some(config_path) = &config_guard.config_file_path {
+                                        match config_guard.save(&config_path.to_string_lossy()) {
+                                            Ok(_) => {
+                                                s.pop_layer();
+                                                s.add_layer(Dialog::info(format!("Sorgente Stack aggiunta: {}", url)));
+                                            },
+                                            Err(e) => {
+                                                s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e)));
+                                            }
+                                        }
+                                    } else {
+                                        s.pop_layer();
+                                        s.add_layer(Dialog::info(format!("Sorgente Stack aggiunta: {}", url)));
+                                    }
                                 } else {
                                     s.add_layer(Dialog::info(format!("La sorgente {} esiste già", url)));
+                                }
+                            }
+                        }
+                    }));
+            }
+        })
+        .button("Salva configurazione", {
+            let config = Arc::clone(&config);
+            move |s| {
+                // Pre-popola con il percorso attuale
+                let initial_path = {
+                    let config_guard = config.lock().unwrap();
+                    config_guard.config_file_path
+                        .as_ref()
+                        .map_or_else(
+                            || get_default_config_path().to_string_lossy().to_string(),
+                            |p| p.to_string_lossy().to_string()
+                        )
+                };
+
+                // Crea un EditView con il contenuto iniziale
+                let edit_view = EditView::new()
+                    .content(initial_path)
+                    .with_name("path_input")
+                    .fixed_width(50);
+
+                s.add_layer(Dialog::around(
+                    LinearLayout::vertical()
+                        .child(TextView::new("Inserisci il percorso del file di configurazione:"))
+                        .child(DummyView.fixed_height(1))
+                        .child(edit_view)
+                ).title("Salva configurazione")
+                    .button("Cancel", |s| { s.pop_layer(); })
+                    .button("OK", {
+                        let config = Arc::clone(&config);
+                        move |s| {
+                            let path = s.call_on_name("path_input", |view: &mut EditView| {
+                                view.get_content()
+                            }).unwrap().to_string();
+
+                            if path.is_empty() {
+                                s.add_layer(Dialog::info("Il percorso non può essere vuoto"));
+                                return;
+                            }
+
+                            // Salva la configurazione
+                            {
+                                let mut config_guard = config.lock().unwrap();
+                                match config_guard.save(&path) {
+                                    Ok(_) => {
+                                        // Aggiorna il percorso nella configurazione
+                                        config_guard.config_file_path = Some(PathBuf::from(&path));
+                                        s.pop_layer();
+                                        s.add_layer(Dialog::info(format!("Configurazione salvata in: {}", path)));
+                                    },
+                                    Err(e) => {
+                                        s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e)));
+                                    }
                                 }
                             }
                         }
@@ -307,9 +419,9 @@ fn get_statistics(tasks: &Arc<Mutex<Vec<Task>>>, stacks: &Arc<Mutex<Vec<Stack>>>
     let partially_installed_stacks = stacks_guard.iter().filter(|s| s.partially_installed).count();
 
     // Task per tipo
-    let bash_tasks = tasks_guard.iter().filter(|t| t.script_type == crate::task::ScriptType::Bash).count();
-    let ansible_tasks = tasks_guard.iter().filter(|t| t.script_type == crate::task::ScriptType::Ansible).count();
-    let mixed_tasks = tasks_guard.iter().filter(|t| t.script_type == crate::task::ScriptType::Mixed).count();
+    let bash_tasks = tasks_guard.iter().filter(|t| t.script_type == ScriptType::Bash).count();
+    let ansible_tasks = tasks_guard.iter().filter(|t| t.script_type == ScriptType::Ansible).count();
+    let mixed_tasks = tasks_guard.iter().filter(|t| t.script_type == ScriptType::Mixed).count();
 
     // Formatta le statistiche
     let mut stats = String::new();

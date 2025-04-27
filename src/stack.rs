@@ -297,8 +297,24 @@ pub fn load_stacks(config: &Config, tasks: &[Task]) -> Result<Vec<Stack>> {
 
     // Verifica che la directory esista
     if !stacks_dir.exists() {
-        warn!("Stacks directory does not exist: {}", config.stacks_dir);
+        info!("Stacks directory does not exist: {}, creating it", config.stacks_dir);
+        fs::create_dir_all(stacks_dir).context(format!("Failed to create stacks directory: {}", config.stacks_dir))?;
         return Ok(stacks);
+    }
+
+    // Crea una configurazione di stack di esempio se non ci sono file .conf
+    let conf_files = fs::read_dir(stacks_dir)
+        .context(format!("Failed to read stacks directory: {}", config.stacks_dir))?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.path().is_file() &&
+                entry.path().extension().map_or(false, |ext| ext == "conf")
+        })
+        .count();
+
+    if conf_files == 0 {
+        info!("No stack configuration files found, creating an example");
+        create_example_stack_config(stacks_dir)?;
     }
 
     // Leggi tutti i file di configurazione (con estensione .conf)
@@ -356,4 +372,48 @@ pub fn load_stacks(config: &Config, tasks: &[Task]) -> Result<Vec<Stack>> {
 
     info!("Loaded {} stacks", stacks.len());
     Ok(stacks)
+}
+
+/// Crea un file di configurazione di stack di esempio
+fn create_example_stack_config(stacks_dir: &Path) -> Result<()> {
+    let example_file_path = stacks_dir.join("example_stacks.conf");
+
+    let example_content = r#"# Esempio di configurazione degli stack
+# Questo file contiene definizioni di stack di esempio
+
+stacks:
+  - name: base_system
+    description: "Stack di base per la configurazione del sistema"
+    tasks:
+      - example_bash_task
+    requires_reboot: false
+    tags:
+      - system
+      - base
+
+  - name: web_server
+    description: "Stack per configurare un server web"
+    tasks:
+      - example_bash_task
+      - example_ansible_task
+    requires_reboot: true
+    tags:
+      - web
+      - server
+
+  - name: monitoring
+    description: "Stack per configurare il monitoraggio del sistema"
+    tasks:
+      - example_mixed_task
+    requires_reboot: false
+    tags:
+      - monitoring
+      - system
+"#;
+
+    fs::write(&example_file_path, example_content)
+        .context(format!("Failed to write example stack config file: {:?}", example_file_path))?;
+
+    info!("Created example stack configuration file: {:?}", example_file_path);
+    Ok(())
 }

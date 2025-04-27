@@ -410,8 +410,24 @@ pub fn load_tasks(config: &Config) -> Result<Vec<Task>> {
 
     // Verifica che la directory esista
     if !tasks_dir.exists() {
-        warn!("Tasks directory does not exist: {}", config.tasks_dir);
+        info!("Tasks directory does not exist: {}, creating it", config.tasks_dir);
+        fs::create_dir_all(tasks_dir).context(format!("Failed to create tasks directory: {}", config.tasks_dir))?;
         return Ok(tasks);
+    }
+
+    // Crea una configurazione di task di esempio se non ci sono file .conf
+    let conf_files = fs::read_dir(tasks_dir)
+        .context(format!("Failed to read tasks directory: {}", config.tasks_dir))?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.path().is_file() &&
+                entry.path().extension().map_or(false, |ext| ext == "conf")
+        })
+        .count();
+
+    if conf_files == 0 {
+        info!("No task configuration files found, creating an example");
+        create_example_task_config(tasks_dir)?;
     }
 
     // Leggi tutti i file di configurazione (con estensione .conf)
@@ -469,4 +485,50 @@ pub fn load_tasks(config: &Config) -> Result<Vec<Task>> {
 
     info!("Loaded {} tasks", tasks.len());
     Ok(tasks)
+}
+
+/// Crea un file di configurazione di task di esempio
+fn create_example_task_config(tasks_dir: &Path) -> Result<()> {
+    let example_file_path = tasks_dir.join("example_tasks.conf");
+
+    let example_content = r#"# Esempio di configurazione dei task
+# Questo file contiene definizioni di task di esempio
+
+tasks:
+  - name: example_bash_task
+    type: bash
+    description: "Un task bash di esempio che installa un pacchetto"
+    url: "https://example.com/tasks/bash_task.tgz"
+    requires_reboot: false
+    tags:
+      - example
+      - bash
+
+  - name: example_ansible_task
+    type: ansible
+    description: "Un task ansible di esempio che configura un servizio"
+    url: "https://example.com/tasks/ansible_task.zip"
+    cleanup_command: "systemctl stop example_service"
+    requires_reboot: true
+    tags:
+      - example
+      - ansible
+      - service
+
+  - name: example_mixed_task
+    type: mixed
+    description: "Un task misto di esempio che può usare sia bash che ansible"
+    url: "https://example.com/tasks/mixed_task.tar.gz"
+    dependencies:
+      - example_bash_task
+    tags:
+      - example
+      - mixed
+"#;
+
+    fs::write(&example_file_path, example_content)
+        .context(format!("Failed to write example task config file: {:?}", example_file_path))?;
+
+    info!("Created example task configuration file: {:?}", example_file_path);
+    Ok(())
 }
