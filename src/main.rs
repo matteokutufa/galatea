@@ -12,6 +12,7 @@ mod stack;
 mod task;
 mod ui;
 mod utils;
+mod logger;
 
 use crate::config::{Config, create_example_config};
 use crate::ui::app::run_app;

@@ -797,6 +797,7 @@ dependencies = [
  "dirs",
  "env_logger",
  "flate2",
+ "lazy_static",
  "libc",
  "log",
  "reqwest",
