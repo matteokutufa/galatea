@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::fs;
 use std::collections::HashMap;
+use std::fmt::Display;
 use anyhow::{Context, Result, anyhow};
 use serde::{Serialize, Deserialize};
 use log::{info, warn, error, debug};
@@ -289,6 +290,12 @@ impl Stack {
     }
 }
 
+impl Display for Stack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
 /// Carica gli stack da tutti i file di configurazione disponibili
 pub fn load_stacks(config: &Config, tasks: &[Task]) -> Result<Vec<Stack>> {
     info!("Loading stacks from configuration files");
@@ -326,7 +333,52 @@ pub fn load_stacks(config: &Config, tasks: &[Task]) -> Result<Vec<Stack>> {
     // Leggi tutti i file di configurazione (con estensione .conf)
     for entry in fs::read_dir(stacks_dir)
         .context(format!("Failed to read stacks directory: {}", config.stacks_dir))? {
-        // ... resto del codice rimane invariato ...
+
+        let entry = entry.context("Failed to read directory entry")?;
+        let path = entry.path();
+
+        // Processa solo i file con estensione .conf
+        if path.is_file() && path.extension().map_or(false, |ext| ext == "conf") {
+            info!("Processing stack configuration file: {:?}", path);
+
+            // Leggi il contenuto del file
+            let content = fs::read_to_string(&path)
+                .context(format!("Failed to read stack config file: {:?}", path))?;
+
+            // Parse del YAML
+            let yaml_value: serde_yaml::Value = serde_yaml::from_str(&content)
+                .context(format!("Failed to parse YAML from: {:?}", path))?;
+
+            // Estrai gli stack dal documento YAML
+            if let Some(stacks_value) = yaml_value.get("stacks") {
+                if let Some(stacks_array) = stacks_value.as_sequence() {
+                    for stack_yaml in stacks_array {
+                        if let Some(stack_map) = stack_yaml.as_mapping() {
+                            // Converti la mappa in HashMap
+                            let mut hashmap = HashMap::new();
+                            for (key, value) in stack_map {
+                                if let Some(key_str) = key.as_str() {
+                                    hashmap.insert(key_str.to_string(), value.clone());
+                                }
+                            }
+
+                            // Crea lo stack
+                            match Stack::from_hashmap(&hashmap) {
+                                Ok(mut stack) => {
+                                    // Verifica lo stato di installazione
+                                    stack.check_installation_status(tasks)?;
+                                    info!("Successfully loaded stack: {:?}", stack.clone());
+                                    stacks.push(stack); // Push to stacks vector
+                                },
+                                Err(e) => {
+                                    warn!("Failed to create stack from config: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     info!("Loaded {} stacks", stacks.len());

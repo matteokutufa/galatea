@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::collections::HashMap;
+use std::fmt::Display;
 use anyhow::{Context, Result, anyhow};
 use serde::{Serialize, Deserialize};
 use log::{info, warn, debug, error};
@@ -13,7 +14,7 @@ use log::{info, warn, debug, error};
 use crate::config::Config;
 use crate::downloader;
 use crate::executor;
-
+use crate::stack::Stack;
 
 /// Tipi di script supportati
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -402,6 +403,12 @@ impl Task {
     }
 }
 
+impl Display for Task {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
 /// Carica i task da tutti i file di configurazione disponibili
 pub fn load_tasks(config: &Config) -> Result<Vec<Task>> {
     info!("Loading tasks from configuration files");
@@ -439,7 +446,53 @@ pub fn load_tasks(config: &Config) -> Result<Vec<Task>> {
     // Leggi tutti i file di configurazione (con estensione .conf)
     for entry in fs::read_dir(tasks_dir)
         .context(format!("Failed to read tasks directory: {}", config.tasks_dir))? {
-        // ... resto del codice rimane invariato ...
+
+        let entry = entry.context("Failed to read directory entry")?;
+        let path = entry.path();
+
+        // Processa solo i file con estensione .conf
+        if path.is_file() && path.extension().map_or(false, |ext| ext == "conf") {
+            info!("Processing task configuration file: {:?}", path);
+
+            // Leggi il contenuto del file
+            let content = fs::read_to_string(&path)
+                .context(format!("Failed to read task config file: {:?}", path))?;
+
+            // Parse del YAML
+            let yaml_value: serde_yaml::Value = serde_yaml::from_str(&content)
+                .context(format!("Failed to parse YAML from: {:?}", path))?;
+
+            // Estrai i task dal documento YAML
+            if let Some(tasks_value) = yaml_value.get("tasks") {
+                if let Some(tasks_array) = tasks_value.as_sequence() {
+                    for task_yaml in tasks_array {
+                        if let Some(task_map) = task_yaml.as_mapping() {
+                            // Converti la mappa in HashMap
+                            let mut hashmap = HashMap::new();
+                            for (key, value) in task_map {
+                                if let Some(key_str) = key.as_str() {
+                                    hashmap.insert(key_str.to_string(), value.clone());
+                                }
+                            }
+
+                            // Crea il task
+                            match Task::from_hashmap(&hashmap) {
+                                Ok(mut task) => {
+                                    // Verifica lo stato di installazione
+                                    task.check_installed(config)?;
+                                    info!("Successfully loaded task: {:?}", task.clone());
+                                    tasks.push(task); // Push after logging
+                                },
+                                Err(e) => {
+                                    warn!("Failed to create task from config: {}", e);
+                                }
+                            }
+
+                        }
+                    }
+                }
+            }
+        }
     }
 
     info!("Loaded {} tasks", tasks.len());
