@@ -15,7 +15,7 @@ lazy_static! {
     static ref LOG_FILE: Mutex<Option<File>> = Mutex::new(None);
 }
 
-/// Inizializza il sistema di logging su file
+/// Inizializza il sistema di logging su file (solo su file, non su console)
 pub fn init_file_logger(log_dir: &str) -> Result<()> {
     // Crea la directory dei log se non esiste
     fs::create_dir_all(log_dir).context("Failed to create log directory")?;
@@ -35,30 +35,10 @@ pub fn init_file_logger(log_dir: &str) -> Result<()> {
     let mut log_file_guard = LOG_FILE.lock().unwrap();
     *log_file_guard = Some(file);
 
-    // Configura il logger per usare la nostra funzione
-    env_logger::Builder::from_default_env()
-        .format(|buf, record| {
-            let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
-            let level = record.level();
-            let message = record.args();
-            let module = record.module_path().unwrap_or("unknown");
-
-            // Formatta il messaggio
-            let formatted = format!("[{}] {} {}: {}\n", timestamp, level, module, message);
-
-            // Scrivi sul file
-            if let Ok(log_file_guard) = LOG_FILE.lock() {
-                if let Some(mut file) = log_file_guard.as_ref() {
-                    let _ = file.write_all(formatted.as_bytes());
-                    let _ = file.flush();
-                }
-            }
-
-            // Scrivi anche sul buffer standard
-            writeln!(buf, "{}", formatted)
-        })
-        .filter_level(log::LevelFilter::Info)
-        .init();
+    // Configura il logger per scrivere SOLO sul file, non su stdout
+    log::set_boxed_logger(Box::new(FileLogger))
+        .map(|()| log::set_max_level(log::LevelFilter::Info))
+        .context("Failed to set logger")?;
 
     log::info!("Logger initialized, writing to: {:?}", log_file_path);
     Ok(())
@@ -92,4 +72,41 @@ pub fn get_recent_logs(lines: usize) -> Result<Vec<String>> {
     }
 
     Ok(Vec::new())
+}
+
+/// Implementazione di un logger personalizzato che scrive solo su file
+struct FileLogger;
+
+impl log::Log for FileLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
+            let formatted = format!(
+                "[{}] {} {}: {}\n",
+                timestamp,
+                record.level(),
+                record.module_path().unwrap_or("unknown"),
+                record.args()
+            );
+
+            if let Ok(log_file_guard) = LOG_FILE.lock() {
+                if let Some(mut file) = log_file_guard.as_ref() {
+                    let _ = file.write_all(formatted.as_bytes());
+                    let _ = file.flush();
+                }
+            }
+        }
+    }
+
+    fn flush(&self) {
+        if let Ok(log_file_guard) = LOG_FILE.lock() {
+            if let Some(mut file) = log_file_guard.as_ref() {
+                let _ = file.flush();
+            }
+        }
+    }
 }

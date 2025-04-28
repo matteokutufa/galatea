@@ -22,3 +22,77 @@ zip = "2.6.1"
 libc = "0.2.172"
 clap = "4.5.37"
 lazy_static = "1.5.0"
+
+# Profilo di release ottimizzato per Galatea
+[profile.release]
+# Ottimizzazione massima per le prestazioni
+opt-level = 3
+
+# Link Time Optimization (LTO) per ridurre la dimensione e migliorare le prestazioni
+# "fat" per la massima ottimizzazione, anche se aumenta i tempi di compilazione
+lto = "fat"
+
+# Inline più aggressivo per funzioni piccole
+codegen-units = 1
+
+# Abilita le ottimizzazioni specifiche per la CPU di compilazione
+# Commenta questa riga se vuoi distribuire l'eseguibile su macchine diverse
+# target-cpu = "native"
+
+# Rimuove le informazioni di debug per ridurre la dimensione
+debug = false
+
+# Abilita le panic come abort invece di unwind per ridurre la dimensione
+panic = 'abort'
+
+# Ottimizza per la dimensione del codice (elimina codice non utilizzato)
+strip = true
+
+# Incrementa il numero di passaggi di ottimizzazione
+# overflow-checks = false  # Disabilita solo se sei sicuro che non ci siano overflow
+
+
+# Profilo per sviluppo veloce
+[profile.dev]
+opt-level = 0
+debug = true
+overflow-checks = true
+debug-assertions = true
+
+# Profilo per test
+[profile.test]
+opt-level = 0
+debug = true
+overflow-checks = true
+debug-assertions = true
+
+# Profilo per benchmark
+[profile.bench]
+opt-level = 3
+debug = false
+lto = true
+codegen-units = 1
+
+
+# Profilo personalizzato per release rapida (per test pre-produzione)
+[profile.release-fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
+# Dipendenze specifiche per la compilazione
+[build-dependencies]
+# Aggiungi qui se hai dipendenze di build
+
+# Configurazione delle features
+[features]
+default = []
+
+# Feature per logging avanzato (disabilitato in produzione per prestazioni)
+advanced-logging = []
+
+# Feature per supporto multi-lingua
+# multi-lang = []
+
+# Feature per GUI aggiuntiva
+# gui = []

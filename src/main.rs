@@ -2,8 +2,6 @@ use std::path::Path;
 use std::process;
 use clap::{Arg, Command};
 use anyhow::{Result, Context};
-use log::{info, error, LevelFilter};
-use env_logger::Builder;
 
 mod config;
 mod downloader;
@@ -18,10 +16,6 @@ use crate::config::{Config, create_example_config};
 use crate::ui::app::run_app;
 
 fn main() -> Result<()> {
-    // Configurazione del logger
-    let mut builder = Builder::new();
-    builder.filter_level(LevelFilter::Info).init();
-
     // Parsing degli argomenti da linea di comando
     let matches = Command::new("Galatea")
         .version("0.1.0")
@@ -56,18 +50,16 @@ fn main() -> Result<()> {
     let config_path = matches.get_one::<String>("config").map(|s| s.as_str());
     let config = match Config::load(config_path) {
         Ok(config) => {
-            info!("Configurazione caricata con successo");
             config
         },
         Err(e) => {
-            error!("Errore durante il caricamento della configurazione: {}", e);
             eprintln!("Errore durante il caricamento della configurazione: {}", e);
             eprintln!("Prova ad eseguire il programma con l'opzione --create-example per creare una configurazione di esempio");
             process::exit(1);
         }
     };
 
-    // Avvio dell'applicazione
+    // Avvio dell'applicazione senza logging
     run_app(config).context("Errore durante l'esecuzione dell'applicazione")?;
 
     Ok(())

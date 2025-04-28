@@ -8,7 +8,6 @@ use std::fs;
 use anyhow::{Context, Result};
 use confucius::{Config as ConfuciusConfig, ConfigValue};
 use serde::{Serialize, Deserialize};
-use log::{info, warn};
 
 /// Struttura principale di configurazione per Galatea
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,33 +68,26 @@ impl Config {
 
         // Se è specificato un path esplicito, prova a caricare da lì
         if let Some(explicit_path) = path {
-            info!("Tentativo di caricamento configurazione da: {}", explicit_path);
-            if let Ok(_) = conf.load_from_file(Path::new(explicit_path)) {
-                info!("Configurazione caricata con successo da: {}", explicit_path);
+            if conf.load_from_file(Path::new(explicit_path)).is_ok() {
                 config_loaded = true;
                 config_file_path = Some(PathBuf::from(explicit_path));
-            } else {
-                warn!("Impossibile caricare la configurazione da: {}", explicit_path);
             }
         }
 
         // Se non è stato caricato da un path esplicito, usa la funzionalità di auto-ricerca di confucius
         if !config_loaded {
-            info!("Ricerca automatica del file di configurazione");
             match conf.load() {
                 Ok(_) => {
-                    info!("Configurazione caricata con successo dai percorsi standard");
                     config_loaded = true;
                 },
-                Err(e) => {
-                    warn!("Impossibile trovare o caricare la configurazione dai percorsi standard: {}", e);
+                Err(_) => {
+                    // Nessun file trovato
                 }
             }
         }
 
         // Se la configurazione non è stata trovata, crea e salva una configurazione di default
         if !config_loaded {
-            info!("Creazione di una configurazione di default");
             let mut default_config = Config::default();
 
             // Crea e salva la configurazione di default
@@ -108,8 +100,6 @@ impl Config {
             }
 
             default_config.save(&default_config_path.to_string_lossy())?;
-            info!("Configurazione di default salvata in: {:?}", default_config_path);
-
             default_config.config_file_path = Some(default_config_path);
             return Ok(default_config);
         }
@@ -174,14 +164,11 @@ impl Config {
         // Crea le directory se non esistono
         create_directories(&config)?;
 
-        info!("Configurazione caricata con successo");
         Ok(config)
     }
 
     /// Salva la configurazione in un file
     pub fn save(&self, path: &str) -> Result<()> {
-        info!("Salvataggio configurazione in: {}", path);
-
         let mut conf = ConfuciusConfig::new("galatea");
 
         // Configurazioni generali
@@ -215,7 +202,6 @@ impl Config {
         conf.save_to_file(Path::new(path))
             .context(format!("Impossibile salvare la configurazione in: {}", path))?;
 
-        info!("Configurazione salvata con successo");
         Ok(())
     }
 
@@ -276,7 +262,6 @@ fn create_directories(config: &Config) -> Result<()> {
 
     for dir in dirs.iter() {
         if !Path::new(dir).exists() {
-            info!("Creazione directory: {}", dir);
             fs::create_dir_all(dir)
                 .context(format!("Impossibile creare la directory: {}", dir))?;
         }
@@ -304,8 +289,6 @@ pub fn get_default_config_path() -> PathBuf {
 
 /// Crea un file di configurazione di esempio nella directory specificata
 pub fn create_example_config(path: &Path) -> Result<()> {
-    info!("Creazione configurazione di esempio in: {:?}", path);
-
     let default_config = Config::default();
 
     // Aggiungi alcuni valori di esempio
@@ -317,6 +300,5 @@ pub fn create_example_config(path: &Path) -> Result<()> {
     // Salva la configurazione di esempio
     config.save(&path.to_string_lossy())?;
 
-    info!("File di configurazione di esempio creato con successo");
     Ok(())
 }
