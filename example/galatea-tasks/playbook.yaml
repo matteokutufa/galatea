@@ -1,0 +1,28 @@
+---
+# Nome del playbook: echo_file_creator.yml
+# Scopo: Creare un file in /tmp con la scritta "echo"
+# Autore: Claude
+# Data: 7 maggio 2025
+
+- name: Crea file con contenuto "echo" in /tmp
+  hosts: all  # Esegue su tutti gli host definiti nell'inventario
+  become: yes  # Utilizza privilegi elevati (sudo)
+  
+  tasks:
+    - name: Assicura che la directory /tmp esista
+      file:
+        path: /tmp
+        state: directory
+        mode: '0755'  # Permessi standard per /tmp
+      
+    - name: Crea file con contenuto "echo"
+      copy:
+        dest: /tmp/echo_file.txt
+        content: "echo 2"
+        mode: '0644'  # Permessi di lettura/scrittura per owner, lettura per gli altri
+      register: file_result  # Registra il risultato dell'operazione
+      
+    - name: Mostra informazioni sul file creato
+      debug:
+        msg: "File creato in {{ file_result.dest }} con contenuto '{{ file_result.content }}'"
+      when: file_result.changed  # Esegue solo se il file è stato effettivamente creato/modificato
