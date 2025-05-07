@@ -120,7 +120,7 @@ pub fn create_stack_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, stacks: 
                     .collect();
 
                 // Invia i dati al callback
-                select_view_cb.send(Box::new(move |s: &mut Cursive| {
+                if let Err(e) = select_view_cb.send(Box::new(move |s: &mut Cursive| {
                     s.call_on_name("stack_list", |view: &mut SelectView<usize>| {
                         view.clear();
 
@@ -137,7 +137,9 @@ pub fn create_stack_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, stacks: 
                             view.add_item(stack_line, idx);
                         }
                     });
-                })).unwrap();
+                })) {
+                    eprintln!("Errore nell'aggiornamento della vista: {}", e);
+                }
             }
         }
     };
@@ -161,10 +163,21 @@ pub fn create_stack_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, stacks: 
             };
 
             // Ottieni lo stack selezionato
-            if let Ok(mut stacks_guard) = stacks.lock() {
+            let stack_result = {
+                let mut stacks_guard = match stacks.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        s.add_layer(Dialog::info(format!("Errore nel blocco degli stack: {}", e)));
+                        return;
+                    }
+                };
+
                 let stack = match stacks_guard.get_mut(idx) {
                     Some(stack) => stack,
-                    None => return,
+                    None => {
+                        s.add_layer(Dialog::info("Stack non trovato"));
+                        return;
+                    }
                 };
 
                 // Verifica che lo stack non sia già installato
@@ -173,19 +186,41 @@ pub fn create_stack_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, stacks: 
                     return;
                 }
 
-                // Installa lo stack
-                if let Ok(config_guard) = config.lock() {
-                    if let Ok(mut tasks_guard) = tasks.lock() {
-                        match stack.install(&config_guard, &mut tasks_guard) {
-                            Ok(_) => {
-                                s.add_layer(Dialog::info(format!("Stack {} installato con successo", stack.name)));
-                                update_fn();
-                            },
-                            Err(e) => {
-                                s.add_layer(Dialog::info(format!("Errore durante l'installazione dello stack: {}", e)));
-                            }
+                // Crea un nuovo scope per limitare la durata dei lock
+                let install_result = {
+                    let config_guard = match config.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            s.add_layer(Dialog::info(format!("Errore nel blocco della configurazione: {}", e)));
+                            return;
                         }
-                    }
+                    };
+
+                    let mut tasks_guard = match tasks.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            s.add_layer(Dialog::info(format!("Errore nel blocco dei task: {}", e)));
+                            return;
+                        }
+                    };
+
+                    let result = stack.install(&config_guard, &mut tasks_guard);
+                    
+                    // I lock vengono rilasciati qui, alla fine dello scope
+                    result
+                };
+
+                install_result
+            };
+
+            // Gestisci il risultato dell'installazione
+            match stack_result {
+                Ok(_) => {
+                    s.add_layer(Dialog::info("Stack installato con successo"));
+                    update_fn();
+                },
+                Err(e) => {
+                    s.add_layer(Dialog::info(format!("Errore durante l'installazione dello stack: {}", e)));
                 }
             }
         })
@@ -204,10 +239,21 @@ pub fn create_stack_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, stacks: 
             };
 
             // Ottieni lo stack selezionato
-            if let Ok(mut stacks_guard) = stacks.lock() {
+            let stack_result = {
+                let mut stacks_guard = match stacks.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        s.add_layer(Dialog::info(format!("Errore nel blocco degli stack: {}", e)));
+                        return;
+                    }
+                };
+
                 let stack = match stacks_guard.get_mut(idx) {
                     Some(stack) => stack,
-                    None => return,
+                    None => {
+                        s.add_layer(Dialog::info("Stack non trovato"));
+                        return;
+                    }
                 };
 
                 // Verifica che lo stack sia almeno parzialmente installato
@@ -216,19 +262,41 @@ pub fn create_stack_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, stacks: 
                     return;
                 }
 
-                // Disinstalla lo stack
-                if let Ok(config_guard) = config.lock() {
-                    if let Ok(mut tasks_guard) = tasks.lock() {
-                        match stack.uninstall(&config_guard, &mut tasks_guard) {
-                            Ok(_) => {
-                                s.add_layer(Dialog::info(format!("Stack {} disinstallato con successo", stack.name)));
-                                update_fn();
-                            },
-                            Err(e) => {
-                                s.add_layer(Dialog::info(format!("Errore durante la disinstallazione dello stack: {}", e)));
-                            }
+                // Esegui la disinstallazione in un nuovo scope
+                let uninstall_result = {
+                    let config_guard = match config.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            s.add_layer(Dialog::info(format!("Errore nel blocco della configurazione: {}", e)));
+                            return;
                         }
-                    }
+                    };
+
+                    let mut tasks_guard = match tasks.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            s.add_layer(Dialog::info(format!("Errore nel blocco dei task: {}", e)));
+                            return;
+                        }
+                    };
+
+                    let result = stack.uninstall(&config_guard, &mut tasks_guard);
+                    
+                    // I lock vengono rilasciati qui
+                    result
+                };
+
+                uninstall_result
+            };
+
+            // Gestisci il risultato della disinstallazione
+            match stack_result {
+                Ok(_) => {
+                    s.add_layer(Dialog::info("Stack disinstallato con successo"));
+                    update_fn();
+                },
+                Err(e) => {
+                    s.add_layer(Dialog::info(format!("Errore durante la disinstallazione dello stack: {}", e)));
                 }
             }
         })
@@ -246,10 +314,21 @@ pub fn create_stack_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, stacks: 
             };
 
             // Ottieni lo stack selezionato
-            if let Ok(mut stacks_guard) = stacks.lock() {
+            let stack_result = {
+                let mut stacks_guard = match stacks.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        s.add_layer(Dialog::info(format!("Errore nel blocco degli stack: {}", e)));
+                        return;
+                    }
+                };
+
                 let stack = match stacks_guard.get_mut(idx) {
                     Some(stack) => stack,
-                    None => return,
+                    None => {
+                        s.add_layer(Dialog::info("Stack non trovato"));
+                        return;
+                    }
                 };
 
                 // Verifica che lo stack sia almeno parzialmente installato
@@ -258,18 +337,40 @@ pub fn create_stack_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, stacks: 
                     return;
                 }
 
-                // Reset dello stack
-                if let Ok(config_guard) = config.lock() {
-                    if let Ok(mut tasks_guard) = tasks.lock() {
-                        match stack.reset(&config_guard, &mut tasks_guard) {
-                            Ok(_) => {
-                                s.add_layer(Dialog::info(format!("Reset dello stack {} completato con successo", stack.name)));
-                            },
-                            Err(e) => {
-                                s.add_layer(Dialog::info(format!("Errore durante il reset dello stack: {}", e)));
-                            }
+                // Esegui il reset in un nuovo scope
+                let reset_result = {
+                    let config_guard = match config.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            s.add_layer(Dialog::info(format!("Errore nel blocco della configurazione: {}", e)));
+                            return;
                         }
-                    }
+                    };
+
+                    let mut tasks_guard = match tasks.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            s.add_layer(Dialog::info(format!("Errore nel blocco dei task: {}", e)));
+                            return;
+                        }
+                    };
+
+                    let result = stack.reset(&config_guard, &mut tasks_guard);
+                    
+                    // I lock vengono rilasciati qui
+                    result
+                };
+
+                reset_result
+            };
+
+            // Gestisci il risultato del reset
+            match stack_result {
+                Ok(_) => {
+                    s.add_layer(Dialog::info("Reset dello stack completato con successo"));
+                },
+                Err(e) => {
+                    s.add_layer(Dialog::info(format!("Errore durante il reset dello stack: {}", e)));
                 }
             }
         })
@@ -287,10 +388,21 @@ pub fn create_stack_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, stacks: 
             };
 
             // Ottieni lo stack selezionato
-            if let Ok(mut stacks_guard) = stacks.lock() {
+            let stack_result = {
+                let mut stacks_guard = match stacks.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        s.add_layer(Dialog::info(format!("Errore nel blocco degli stack: {}", e)));
+                        return;
+                    }
+                };
+
                 let stack = match stacks_guard.get_mut(idx) {
                     Some(stack) => stack,
-                    None => return,
+                    None => {
+                        s.add_layer(Dialog::info("Stack non trovato"));
+                        return;
+                    }
                 };
 
                 // Verifica che lo stack sia almeno parzialmente installato
@@ -299,18 +411,40 @@ pub fn create_stack_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, stacks: 
                     return;
                 }
 
-                // Riavvia i servizi dello stack
-                if let Ok(config_guard) = config.lock() {
-                    if let Ok(mut tasks_guard) = tasks.lock() {
-                        match stack.remediate(&config_guard, &mut tasks_guard) {
-                            Ok(_) => {
-                                s.add_layer(Dialog::info(format!("Remediation dello stack {} completata con successo", stack.name)));
-                            },
-                            Err(e) => {
-                                s.add_layer(Dialog::info(format!("Errore durante la remediation dello stack: {}", e)));
-                            }
+                // Esegui la remediation in un nuovo scope
+                let remediate_result = {
+                    let config_guard = match config.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            s.add_layer(Dialog::info(format!("Errore nel blocco della configurazione: {}", e)));
+                            return;
                         }
-                    }
+                    };
+
+                    let mut tasks_guard = match tasks.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            s.add_layer(Dialog::info(format!("Errore nel blocco dei task: {}", e)));
+                            return;
+                        }
+                    };
+
+                    let result = stack.remediate(&config_guard, &mut tasks_guard);
+                    
+                    // I lock vengono rilasciati qui
+                    result
+                };
+
+                remediate_result
+            };
+
+            // Gestisci il risultato della remediation
+            match stack_result {
+                Ok(_) => {
+                    s.add_layer(Dialog::info("Remediation dello stack completata con successo"));
+                },
+                Err(e) => {
+                    s.add_layer(Dialog::info(format!("Errore durante la remediation dello stack: {}", e)));
                 }
             }
         })

@@ -6,8 +6,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::fs;
+use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
-use log::info;
+use log::{info, warn};
 
 /// Esegue un comando generico
 ///
@@ -21,28 +22,97 @@ use log::info;
 pub fn run_command(command: &str) -> Result<()> {
     info!("Running command: {}", command);
 
-    let output = if cfg!(target_os = "windows") {
+    let mut child = if cfg!(target_os = "windows") {
         Command::new("cmd")
             .args(&["/C", command])
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
-            .output()
+            .spawn()
     } else {
         Command::new("sh")
             .args(&["-c", command])
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
-            .output()
+            .spawn()
     }.context(format!("Failed to execute command: {}", command))?;
 
-    if !output.status.success() {
+    // Attendi la terminazione del processo e verifica il codice di uscita
+    let status = child.wait()
+        .context(format!("Failed to wait for command: {}", command))?;
+
+    if !status.success() {
         return Err(anyhow!(
             "Command failed with exit code: {}",
-            output.status.code().unwrap_or(-1)
+            status.code().unwrap_or(-1)
         ));
     }
 
     Ok(())
+}
+
+/// Esegue un comando con timeout
+///
+/// # Arguments
+///
+/// * `command` - Il comando da eseguire
+/// * `timeout_secs` - Timeout in secondi
+///
+/// # Returns
+///
+/// `Ok(())` in caso di successo, altrimenti un errore
+pub fn run_command_with_timeout(command: &str, timeout_secs: u64) -> Result<()> {
+    info!("Running command with timeout {}: {}", timeout_secs, command);
+
+    let mut child = if cfg!(target_os = "windows") {
+        Command::new("cmd")
+            .args(&["/C", command])
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+    } else {
+        Command::new("sh")
+            .args(&["-c", command])
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+    }.context(format!("Failed to execute command: {}", command))?;
+
+    // Implementa un timeout manuale
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return Err(anyhow!(
+                        "Command failed with exit code: {}",
+                        status.code().unwrap_or(-1)
+                    ));
+                }
+                return Ok(());
+            }
+            Ok(None) => {
+                // Processo ancora in esecuzione
+                if start.elapsed() > Duration::from_secs(timeout_secs) {
+                    // Timeout raggiunto, termina il processo
+                    info!("Timeout reached for command: {}", command);
+                    #[cfg(unix)]
+                    {
+                        // Su Unix, invia un SIGTERM
+                        unsafe {
+                            libc::kill(child.id() as i32, libc::SIGTERM);
+                        }
+                    }
+                    #[cfg(windows)]
+                    {
+                        child.kill().ok();
+                    }
+                    return Err(anyhow!("Command timed out after {} seconds", timeout_secs));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(anyhow!("Error waiting for command: {}", e)),
+        }
+    }
 }
 
 /// Esegue uno script bash
@@ -86,18 +156,22 @@ pub fn run_bash_script(script_path: &Path, args: &[&str]) -> Result<()> {
     }
 
     // Esegui lo script
-    let output = Command::new(&script)
+    let mut child = Command::new(&script)
         .args(args)
         .current_dir(script.parent().unwrap_or(Path::new(".")))
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .output()
+        .spawn()
         .context(format!("Failed to execute script: {:?}", script))?;
 
-    if !output.status.success() {
+    // Attendi la terminazione del processo e verifica il codice di uscita
+    let status = child.wait()
+        .context(format!("Failed to wait for script: {:?}", script))?;
+
+    if !status.success() {
         return Err(anyhow!(
             "Script failed with exit code: {}",
-            output.status.code().unwrap_or(-1)
+            status.code().unwrap_or(-1)
         ));
     }
 
@@ -148,7 +222,7 @@ pub fn run_ansible_playbook(playbook_path: &Path, tag: &str) -> Result<()> {
 
     // Esegui il playbook
     info!("Executing ansible-playbook with command: ansible-playbook -i localhost, --connection=local --tags={} {:?}", tag, playbook);
-    let output = Command::new("ansible-playbook")
+    let mut child = Command::new("ansible-playbook")
         .arg("-i")
         .arg("localhost,")
         .arg("--connection=local")
@@ -157,13 +231,17 @@ pub fn run_ansible_playbook(playbook_path: &Path, tag: &str) -> Result<()> {
         .current_dir(playbook.parent().unwrap_or(Path::new(".")))
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .output()
+        .spawn()
         .context(format!("Failed to execute ansible playbook: {:?}", playbook))?;
 
-    if !output.status.success() {
+    // Attendi la terminazione del processo e verifica il codice di uscita
+    let status = child.wait()
+        .context(format!("Failed to wait for ansible playbook: {:?}", playbook))?;
+
+    if !status.success() {
         return Err(anyhow!(
             "Ansible playbook failed with exit code: {}",
-            output.status.code().unwrap_or(-1)
+            status.code().unwrap_or(-1)
         ));
     }
 
@@ -279,17 +357,21 @@ pub fn is_ansible_available() -> bool {
 pub fn run_with_sudo(command: &str) -> Result<()> {
     info!("Running command with sudo: {}", command);
 
-    let output = Command::new("sudo")
+    let mut child = Command::new("sudo")
         .args(&["-S", "sh", "-c", command])
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .output()
+        .spawn()
         .context(format!("Failed to execute command with sudo: {}", command))?;
 
-    if !output.status.success() {
+    // Attendi la terminazione del processo e verifica il codice di uscita
+    let status = child.wait()
+        .context(format!("Failed to wait for command with sudo: {}", command))?;
+
+    if !status.success() {
         return Err(anyhow!(
             "Command with sudo failed with exit code: {}",
-            output.status.code().unwrap_or(-1)
+            status.code().unwrap_or(-1)
         ));
     }
 

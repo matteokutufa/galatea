@@ -100,7 +100,7 @@ pub fn create_task_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Ar
                     .collect();
 
                 // Invia i dati al callback
-                select_view_cb.send(Box::new(move |s: &mut Cursive| {
+                if let Err(e) = select_view_cb.send(Box::new(move |s: &mut Cursive| {
                     s.call_on_name("task_list", |view: &mut SelectView<usize>| {
                         view.clear();
 
@@ -112,7 +112,9 @@ pub fn create_task_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Ar
                             view.add_item(task_line, idx);
                         }
                     });
-                })).unwrap();
+                })) {
+                    eprintln!("Errore nell'aggiornamento della vista: {}", e);
+                }
             }
         }
     };
@@ -134,10 +136,21 @@ pub fn create_task_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Ar
             };
 
             // Ottieni il task selezionato
-            if let Ok(mut tasks_guard) = tasks.lock() {
+            let task_result = {
+                let mut tasks_guard = match tasks.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        s.add_layer(Dialog::info(format!("Errore nel blocco dei task: {}", e)));
+                        return;
+                    }
+                };
+
                 let task = match tasks_guard.get_mut(idx) {
                     Some(task) => task,
-                    None => return,
+                    None => {
+                        s.add_layer(Dialog::info("Task non trovato"));
+                        return;
+                    }
                 };
 
                 // Verifica che il task non sia già installato
@@ -146,17 +159,34 @@ pub fn create_task_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Ar
                     return;
                 }
 
-                // Installa il task
-                if let Ok(config_guard) = config.lock() {
-                    match task.install(&config_guard) {
-                        Ok(_) => {
-                            s.add_layer(Dialog::info(format!("Task {} installato con successo", task.name)));
-                            update_fn();
-                        },
+                // Crea un nuovo scope per limitare la durata del lock sulla configurazione
+                let install_result = {
+                    let config_guard = match config.lock() {
+                        Ok(guard) => guard,
                         Err(e) => {
-                            s.add_layer(Dialog::info(format!("Errore durante l'installazione del task: {}", e)));
+                            s.add_layer(Dialog::info(format!("Errore nel blocco della configurazione: {}", e)));
+                            return;
                         }
-                    }
+                    };
+
+                    // Esegui l'installazione
+                    let result = task.install(&config_guard);
+                    
+                    // Il lock su config_guard viene rilasciato qui, alla fine dello scope
+                    result
+                };
+
+                install_result
+            };
+
+            // Gestisci il risultato dell'installazione
+            match task_result {
+                Ok(_) => {
+                    s.add_layer(Dialog::info("Task installato con successo"));
+                    update_fn();
+                },
+                Err(e) => {
+                    s.add_layer(Dialog::info(format!("Errore durante l'installazione del task: {}", e)));
                 }
             }
         })
@@ -174,10 +204,21 @@ pub fn create_task_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Ar
             };
 
             // Ottieni il task selezionato
-            if let Ok(mut tasks_guard) = tasks.lock() {
+            let task_result = {
+                let mut tasks_guard = match tasks.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        s.add_layer(Dialog::info(format!("Errore nel blocco dei task: {}", e)));
+                        return;
+                    }
+                };
+
                 let task = match tasks_guard.get_mut(idx) {
                     Some(task) => task,
-                    None => return,
+                    None => {
+                        s.add_layer(Dialog::info("Task non trovato"));
+                        return;
+                    }
                 };
 
                 // Verifica che il task sia installato
@@ -186,17 +227,33 @@ pub fn create_task_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Ar
                     return;
                 }
 
-                // Disinstalla il task
-                if let Ok(config_guard) = config.lock() {
-                    match task.uninstall(&config_guard) {
-                        Ok(_) => {
-                            s.add_layer(Dialog::info(format!("Task {} disinstallato con successo", task.name)));
-                            update_fn();
-                        },
+                // Esegui la disinstallazione in un nuovo scope
+                let uninstall_result = {
+                    let config_guard = match config.lock() {
+                        Ok(guard) => guard,
                         Err(e) => {
-                            s.add_layer(Dialog::info(format!("Errore durante la disinstallazione del task: {}", e)));
+                            s.add_layer(Dialog::info(format!("Errore nel blocco della configurazione: {}", e)));
+                            return;
                         }
-                    }
+                    };
+
+                    let result = task.uninstall(&config_guard);
+                    
+                    // Il lock su config_guard viene rilasciato qui
+                    result
+                };
+
+                uninstall_result
+            };
+
+            // Gestisci il risultato della disinstallazione
+            match task_result {
+                Ok(_) => {
+                    s.add_layer(Dialog::info("Task disinstallato con successo"));
+                    update_fn();
+                },
+                Err(e) => {
+                    s.add_layer(Dialog::info(format!("Errore durante la disinstallazione del task: {}", e)));
                 }
             }
         })
@@ -213,10 +270,21 @@ pub fn create_task_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Ar
             };
 
             // Ottieni il task selezionato
-            if let Ok(mut tasks_guard) = tasks.lock() {
+            let task_result = {
+                let mut tasks_guard = match tasks.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        s.add_layer(Dialog::info(format!("Errore nel blocco dei task: {}", e)));
+                        return;
+                    }
+                };
+
                 let task = match tasks_guard.get_mut(idx) {
                     Some(task) => task,
-                    None => return,
+                    None => {
+                        s.add_layer(Dialog::info("Task non trovato"));
+                        return;
+                    }
                 };
 
                 // Verifica che il task sia installato
@@ -225,16 +293,32 @@ pub fn create_task_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Ar
                     return;
                 }
 
-                // Reset del task
-                if let Ok(config_guard) = config.lock() {
-                    match task.reset(&config_guard) {
-                        Ok(_) => {
-                            s.add_layer(Dialog::info(format!("Reset del task {} completato con successo", task.name)));
-                        },
+                // Esegui il reset in un nuovo scope
+                let reset_result = {
+                    let config_guard = match config.lock() {
+                        Ok(guard) => guard,
                         Err(e) => {
-                            s.add_layer(Dialog::info(format!("Errore durante il reset del task: {}", e)));
+                            s.add_layer(Dialog::info(format!("Errore nel blocco della configurazione: {}", e)));
+                            return;
                         }
-                    }
+                    };
+
+                    let result = task.reset(&config_guard);
+                    
+                    // Il lock su config_guard viene rilasciato qui
+                    result
+                };
+
+                reset_result
+            };
+
+            // Gestisci il risultato del reset
+            match task_result {
+                Ok(_) => {
+                    s.add_layer(Dialog::info("Reset del task completato con successo"));
+                },
+                Err(e) => {
+                    s.add_layer(Dialog::info(format!("Errore durante il reset del task: {}", e)));
                 }
             }
         })
@@ -251,10 +335,21 @@ pub fn create_task_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Ar
             };
 
             // Ottieni il task selezionato
-            if let Ok(mut tasks_guard) = tasks.lock() {
+            let task_result = {
+                let mut tasks_guard = match tasks.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        s.add_layer(Dialog::info(format!("Errore nel blocco dei task: {}", e)));
+                        return;
+                    }
+                };
+
                 let task = match tasks_guard.get_mut(idx) {
                     Some(task) => task,
-                    None => return,
+                    None => {
+                        s.add_layer(Dialog::info("Task non trovato"));
+                        return;
+                    }
                 };
 
                 // Verifica che il task sia installato
@@ -263,16 +358,32 @@ pub fn create_task_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Ar
                     return;
                 }
 
-                // Riavvia i servizi del task
-                if let Ok(config_guard) = config.lock() {
-                    match task.remediate(&config_guard) {
-                        Ok(_) => {
-                            s.add_layer(Dialog::info(format!("Remediation del task {} completata con successo", task.name)));
-                        },
+                // Esegui la remediation in un nuovo scope
+                let remediate_result = {
+                    let config_guard = match config.lock() {
+                        Ok(guard) => guard,
                         Err(e) => {
-                            s.add_layer(Dialog::info(format!("Errore durante la remediation del task: {}", e)));
+                            s.add_layer(Dialog::info(format!("Errore nel blocco della configurazione: {}", e)));
+                            return;
                         }
-                    }
+                    };
+
+                    let result = task.remediate(&config_guard);
+                    
+                    // Il lock su config_guard viene rilasciato qui
+                    result
+                };
+
+                remediate_result
+            };
+
+            // Gestisci il risultato della remediation
+            match task_result {
+                Ok(_) => {
+                    s.add_layer(Dialog::info("Remediation del task completata con successo"));
+                },
+                Err(e) => {
+                    s.add_layer(Dialog::info(format!("Errore durante la remediation del task: {}", e)));
                 }
             }
         })

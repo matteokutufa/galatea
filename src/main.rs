@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::process;
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use clap::{Arg, Command};
 use anyhow::{Result, Context, anyhow};
 
@@ -17,6 +19,9 @@ use crate::config::{Config, create_example_config};
 use crate::ui::app::run_app;
 
 fn main() -> Result<()> {
+    // Configura i gestori di segnali
+    setup_signal_handlers()?;
+
     // Verifica se l'applicazione è eseguita come root
     if !utils::is_running_as_root() {
         eprintln!("Errore: Galatea deve essere eseguito con privilegi di root.");
@@ -84,5 +89,27 @@ fn main() -> Result<()> {
     // Avvio dell'applicazione
     run_app(config).context("Errore durante l'esecuzione dell'applicazione")?;
 
+    Ok(())
+}
+
+/// Configura i gestori di segnali
+fn setup_signal_handlers() -> Result<()> {
+    #[cfg(unix)]
+    {
+        use signal_hook::{consts::SIGINT, flag};
+        let running = Arc::new(AtomicBool::new(true));
+        let r = running.clone();
+        
+        flag::register(SIGINT, r).map_err(|e| anyhow!("Failed to register signal handler: {}", e))?;
+        
+        // For custom handler behavior, use signal_hook::iterator
+        std::thread::spawn(move || {
+            if !running.load(Ordering::SeqCst) {
+                println!("\nRicevuto segnale di interruzione, chiusura in corso...");
+                std::process::exit(130); // Exit con codice standard per SIGINT
+            }
+        });
+    }
+    
     Ok(())
 }
