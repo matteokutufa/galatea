@@ -58,7 +58,7 @@ pub fn run_command(command: &str) -> Result<()> {
 pub fn run_bash_script(script_path: &Path, args: &[&str]) -> Result<()> {
     // Determina il percorso dello script
     let script = if script_path.is_dir() {
-        find_script_in_dir(script_path, "install.sh")?
+        find_script_in_dir(script_path, &["install.sh"])?
     } else {
         script_path.to_path_buf()
     };
@@ -115,21 +115,39 @@ pub fn run_bash_script(script_path: &Path, args: &[&str]) -> Result<()> {
 ///
 /// `Ok(())` in caso di successo, altrimenti un errore
 pub fn run_ansible_playbook(playbook_path: &Path, tag: &str) -> Result<()> {
+    info!("Attempting to run ansible playbook at path: {:?}", playbook_path);
+    
     // Determina il percorso del playbook
     let playbook = if playbook_path.is_dir() {
-        find_script_in_dir(playbook_path, "playbook.yml")?
+        // Cerca playbook con diverse estensioni
+        let possible_playbooks = &[
+            "playbook.yml", "playbook.yaml", 
+            "main.yml", "main.yaml", 
+            "site.yml", "site.yaml"
+        ];
+        find_script_in_dir(playbook_path, possible_playbooks)?
     } else {
+        // Usa direttamente il file se non è una directory
         playbook_path.to_path_buf()
     };
 
-    info!("Running ansible playbook: {:?} with tag: {}", playbook, tag);
+    info!("Using playbook: {:?}", playbook);
 
     // Verifica che il playbook esista
     if !playbook.exists() {
         return Err(anyhow!("Playbook not found: {:?}", playbook));
     }
 
+    // Comandi di debug per verificare il contenuto del playbook
+    info!("Playbook content preview:");
+    if let Ok(content) = fs::read_to_string(&playbook) {
+        for (i, line) in content.lines().take(5).enumerate() {
+            info!("Line {}: {}", i + 1, line);
+        }
+    }
+
     // Esegui il playbook
+    info!("Executing ansible-playbook with command: ansible-playbook -i localhost, --connection=local --tags={} {:?}", tag, playbook);
     let output = Command::new("ansible-playbook")
         .arg("-i")
         .arg("localhost,")
@@ -149,6 +167,7 @@ pub fn run_ansible_playbook(playbook_path: &Path, tag: &str) -> Result<()> {
         ));
     }
 
+    info!("Ansible playbook executed successfully");
     Ok(())
 }
 
@@ -157,21 +176,38 @@ pub fn run_ansible_playbook(playbook_path: &Path, tag: &str) -> Result<()> {
 /// # Arguments
 ///
 /// * `dir` - La directory in cui cercare
-/// * `script_name` - Il nome dello script da cercare
+/// * `script_names` - I possibili nomi dello script da cercare
 ///
 /// # Returns
 ///
 /// Il percorso dello script, se trovato
-fn find_script_in_dir(dir: &Path, script_name: &str) -> Result<PathBuf> {
+fn find_script_in_dir(dir: &Path, script_names: &[&str]) -> Result<PathBuf> {
     // Verifica che la directory esista
     if !dir.exists() || !dir.is_dir() {
         return Err(anyhow!("Directory not found: {:?}", dir));
     }
 
-    // Cerca lo script direttamente nella directory
-    let direct_path = dir.join(script_name);
-    if direct_path.exists() {
-        return Ok(direct_path);
+    info!("Searching for scripts in directory: {:?}", dir);
+    info!("Possible script names: {:?}", script_names);
+
+    // Prova tutti i possibili nomi file
+    for script_name in script_names {
+        // Cerca lo script direttamente nella directory
+        let direct_path = dir.join(script_name);
+        info!("Checking for: {:?}, exists: {}", direct_path, direct_path.exists());
+        if direct_path.exists() {
+            return Ok(direct_path);
+        }
+    }
+
+    // Elenco tutti i file nella directory per debug
+    info!("Files in directory:");
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                info!("  {:?}", entry.path());
+            }
+        }
     }
 
     // Altrimenti, cerca in tutte le sottodirectory
@@ -182,14 +218,14 @@ fn find_script_in_dir(dir: &Path, script_name: &str) -> Result<PathBuf> {
         let path = entry.path();
 
         if path.is_dir() {
-            let script_path = find_script_in_dir(&path, script_name);
-            if script_path.is_ok() {
-                return script_path;
+            match find_script_in_dir(&path, script_names) {
+                Ok(path) => return Ok(path),
+                Err(_) => continue,
             }
         }
     }
 
-    Err(anyhow!("Script {} not found in directory {:?}", script_name, dir))
+    Err(anyhow!("No script found in directory {:?} with names {:?}", dir, script_names))
 }
 
 /// Verifica se un comando è disponibile nel sistema
