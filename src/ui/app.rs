@@ -13,7 +13,7 @@ use cursive::view::Scrollable;
 use cursive::traits::*;
 use cursive::align::HAlign;
 
-use crate::config::{Config, get_default_config_path};
+use crate::config::{Config, get_binary_config_path};
 use crate::task::{Task, load_tasks, ScriptType};
 use crate::stack::{Stack, load_stacks};
 use crate::ui::theme;
@@ -215,7 +215,7 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
 
                         // Salva la configurazione aggiornata
                         if let Some(config_path) = &config_guard.config_file_path {
-                            match config_guard.save(&config_path.to_string_lossy()) {
+                            match config_guard.save(config_path) {
                                 Ok(_) => {},
                                 Err(e) => {
                                     s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e)));
@@ -270,7 +270,7 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                                 if config_guard.add_task_source(&url) {
                                     // Salva la configurazione aggiornata
                                     if let Some(config_path) = &config_guard.config_file_path {
-                                        match config_guard.save(&config_path.to_string_lossy()) {
+                                        match config_guard.save(config_path) {
                                             Ok(_) => {
                                                 s.pop_layer();
                                                 s.add_layer(Dialog::info(format!("Sorgente Task aggiunta: {}", url)));
@@ -321,7 +321,7 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                                 if config_guard.add_stack_source(&url) {
                                     // Salva la configurazione aggiornata
                                     if let Some(config_path) = &config_guard.config_file_path {
-                                        match config_guard.save(&config_path.to_string_lossy()) {
+                                        match config_guard.save(config_path) {
                                             Ok(_) => {
                                                 s.pop_layer();
                                                 s.add_layer(Dialog::info(format!("Sorgente Stack aggiunta: {}", url)));
@@ -351,7 +351,7 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                     config_guard.config_file_path
                         .as_ref()
                         .map_or_else(
-                            || get_default_config_path().to_string_lossy().to_string(),
+                            || get_binary_config_path().to_string_lossy().to_string(),
                             |p| p.to_string_lossy().to_string()
                         )
                 };
@@ -384,7 +384,7 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                             // Salva la configurazione
                             {
                                 let mut config_guard = config.lock().unwrap();
-                                match config_guard.save(&path) {
+                                match config_guard.save(&PathBuf::from(&path)) {
                                     Ok(_) => {
                                         // Aggiorna il percorso nella configurazione
                                         config_guard.config_file_path = Some(PathBuf::from(&path));

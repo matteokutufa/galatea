@@ -1,13 +1,13 @@
 //! Gestione della configurazione per Galatea
 //!
 //! Questo modulo gestisce il caricamento e il salvataggio della configurazione dell'applicazione
-//! utilizzando la libreria confucius.
+//! utilizzando YAML.
 
 use std::path::{Path, PathBuf};
 use std::fs;
 use anyhow::{Context, Result};
-use confucius::{Config as ConfuciusConfig, ConfigValue};
 use serde::{Serialize, Deserialize};
+use log::{info, warn};
 
 /// Struttura principale di configurazione per Galatea
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,104 +62,68 @@ impl Config {
 
     /// Carica la configurazione da un file
     pub fn load(path: Option<&str>) -> Result<Self> {
-        let mut conf = ConfuciusConfig::new("galatea");
+        // Definisci i percorsi possibili da cui caricare la configurazione
+        let config_paths = if let Some(explicit_path) = path {
+            // Se è stato specificato un percorso, usa solo quello
+            vec![PathBuf::from(explicit_path)]
+        } else {
+            // Altrimenti, cerca nei percorsi predefiniti
+            vec![
+                get_system_config_path(),  // /etc/galatea/galatea.yaml
+                get_binary_config_path(),  // ./galatea.yaml
+            ]
+        };
+
+        // Prova a caricare da ogni percorso nell'ordine specificato
         let mut config_loaded = false;
+        let mut config = Config::default();
         let mut config_file_path = None;
 
-        // Se è specificato un path esplicito, prova a caricare da lì
-        if let Some(explicit_path) = path {
-            if conf.load_from_file(Path::new(explicit_path)).is_ok() {
-                config_loaded = true;
-                config_file_path = Some(PathBuf::from(explicit_path));
-            }
-        }
-
-        // Se non è stato caricato da un path esplicito, usa la funzionalità di auto-ricerca di confucius
-        if !config_loaded {
-            match conf.load() {
-                Ok(_) => {
-                    config_loaded = true;
-                },
-                Err(_) => {
-                    // Nessun file trovato
+        for config_path in config_paths {
+            if config_path.exists() {
+                info!("Tentativo di caricamento della configurazione da: {:?}", config_path);
+                match fs::read_to_string(&config_path) {
+                    Ok(yaml_content) => {
+                        match serde_yaml::from_str::<Config>(&yaml_content) {
+                            Ok(loaded_config) => {
+                                config = loaded_config;
+                                info!("Configurazione caricata da: {:?}", &config_path);
+                                config_file_path = Some(config_path);
+                                config_loaded = true;
+                                break;
+                            },
+                            Err(e) => {
+                                warn!("Errore nel parsing della configurazione YAML da {:?}: {}", config_path, e);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        warn!("Impossibile leggere il file di configurazione {:?}: {}", config_path, e);
+                    }
                 }
             }
         }
 
         // Se la configurazione non è stata trovata, crea e salva una configurazione di default
         if !config_loaded {
-            let mut default_config = Config::default();
-
-            // Crea e salva la configurazione di default
-            let default_config_path = get_default_config_path();
-            if let Some(parent) = default_config_path.parent() {
-                if !parent.exists() {
-                    fs::create_dir_all(parent)
-                        .context("Impossibile creare la directory per la configurazione di default")?;
-                }
+            let default_config = Config::default();
+            
+            // Determina dove salvare la configurazione di default
+            let default_config_path = get_binary_config_path();
+            
+            if let Err(e) = default_config.save(&default_config_path) {
+                warn!("Impossibile salvare la configurazione di default in {:?}: {}", default_config_path, e);
+                // Continuiamo comunque con la configurazione in memoria
+            } else {
+                info!("Creata configurazione di default in: {:?}", default_config_path);
+                config_file_path = Some(default_config_path);
             }
-
-            default_config.save(&default_config_path.to_string_lossy())?;
-            default_config.config_file_path = Some(default_config_path);
-            return Ok(default_config);
+            
+            config = default_config;
         }
 
-        // Estrai i valori dalla configurazione caricata
-        let tasks_dir = conf.get_string("general", "tasks_dir", None)
-            .unwrap_or_else(|| {
-                let base_dir = get_base_directory();
-                base_dir.join("tasks").to_string_lossy().to_string()
-            });
-
-        let stacks_dir = conf.get_string("general", "stacks_dir", None)
-            .unwrap_or_else(|| {
-                let base_dir = get_base_directory();
-                base_dir.join("stacks").to_string_lossy().to_string()
-            });
-
-        let state_dir = conf.get_string("general", "state_dir", None)
-            .unwrap_or_else(|| {
-                let base_dir = get_base_directory();
-                base_dir.join("state").to_string_lossy().to_string()
-            });
-
-        let download_timeout = conf.get_integer("general", "download_timeout", Some(60))
-            .unwrap_or(60) as u64;
-
-        let ui_theme = conf.get_string("general", "ui_theme", Some("default"))
-            .unwrap_or_else(|| "default".to_string());
-
-        // Estrai le sorgenti dei task
-        let mut task_sources = Vec::new();
-        if let Some(sources) = conf.get_array("sources", "task_sources") {
-            for source in sources {
-                if let Some(url) = source.as_string() {
-                    task_sources.push(url.clone());
-                }
-            }
-        }
-
-        // Estrai le sorgenti degli stack
-        let mut stack_sources = Vec::new();
-        if let Some(sources) = conf.get_array("sources", "stack_sources") {
-            for source in sources {
-                if let Some(url) = source.as_string() {
-                    stack_sources.push(url.clone());
-                }
-            }
-        }
-
-        // Creazione della configurazione
-        let config = Config {
-            tasks_dir,
-            stacks_dir,
-            state_dir,
-            download_timeout,
-            ui_theme,
-            task_sources,
-            stack_sources,
-            config_file_path,
-        };
+        // Imposta il percorso del file di configurazione
+        config.config_file_path = config_file_path;
 
         // Crea le directory se non esistono
         create_directories(&config)?;
@@ -168,40 +132,24 @@ impl Config {
     }
 
     /// Salva la configurazione in un file
-    pub fn save(&self, path: &str) -> Result<()> {
-        let mut conf = ConfuciusConfig::new("galatea");
-
-        // Configurazioni generali
-        conf.set("general", "tasks_dir", ConfigValue::String(self.tasks_dir.clone()));
-        conf.set("general", "stacks_dir", ConfigValue::String(self.stacks_dir.clone()));
-        conf.set("general", "state_dir", ConfigValue::String(self.state_dir.clone()));
-        conf.set("general", "download_timeout", ConfigValue::Integer(self.download_timeout as i64));
-        conf.set("general", "ui_theme", ConfigValue::String(self.ui_theme.clone()));
-
-        // Sorgenti dei task
-        let task_sources: Vec<ConfigValue> = self.task_sources.iter()
-            .map(|url| ConfigValue::String(url.clone()))
-            .collect();
-        conf.set("sources", "task_sources", ConfigValue::Array(task_sources));
-
-        // Sorgenti degli stack
-        let stack_sources: Vec<ConfigValue> = self.stack_sources.iter()
-            .map(|url| ConfigValue::String(url.clone()))
-            .collect();
-        conf.set("sources", "stack_sources", ConfigValue::Array(stack_sources));
-
+    pub fn save(&self, path: &PathBuf) -> Result<()> {
         // Assicurati che la directory esista
-        if let Some(parent) = Path::new(path).parent() {
+        if let Some(parent) = path.parent() {
             if !parent.exists() {
                 fs::create_dir_all(parent)
-                    .context(format!("Impossibile creare la directory per: {}", path))?;
+                    .context(format!("Impossibile creare la directory per: {:?}", path))?;
             }
         }
 
-        // Salva la configurazione
-        conf.save_to_file(Path::new(path))
-            .context(format!("Impossibile salvare la configurazione in: {}", path))?;
+        // Serializza la configurazione in YAML
+        let yaml_content = serde_yaml::to_string(self)
+            .context("Impossibile serializzare la configurazione in YAML")?;
 
+        // Salva la configurazione
+        fs::write(path, yaml_content)
+            .context(format!("Impossibile salvare la configurazione in: {:?}", path))?;
+
+        info!("Configurazione salvata in: {:?}", path);
         Ok(())
     }
 
@@ -282,13 +230,27 @@ pub fn get_base_directory() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// Ottiene il percorso predefinito per il file di configurazione
-pub fn get_default_config_path() -> PathBuf {
-    get_base_directory().join("galatea.conf")
+/// Ottiene il percorso di configurazione nella directory dell'eseguibile
+pub fn get_binary_config_path() -> PathBuf {
+    get_base_directory().join("galatea.yaml")
+}
+
+/// Ottiene il percorso di configurazione di sistema
+pub fn get_system_config_path() -> PathBuf {
+    PathBuf::from("/etc/galatea/galatea.yaml")
 }
 
 /// Crea un file di configurazione di esempio nella directory specificata
 pub fn create_example_config(path: &Path) -> Result<()> {
+    // Assicurati che la directory esista
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            info!("Creazione directory: {:?}", parent);
+            fs::create_dir_all(parent)
+                .context(format!("Impossibile creare la directory per: {:?}", parent))?;
+        }
+    }
+
     let default_config = Config::default();
 
     // Aggiungi alcuni valori di esempio
@@ -297,8 +259,14 @@ pub fn create_example_config(path: &Path) -> Result<()> {
     config.add_task_source("https://example.com/tasks/monitoring.zip");
     config.add_stack_source("https://example.com/stacks/web_server.zip");
 
-    // Salva la configurazione di esempio
-    config.save(&path.to_string_lossy())?;
+    // Serializza la configurazione in YAML
+    let yaml_content = serde_yaml::to_string(&config)
+        .context("Impossibile serializzare la configurazione di esempio in YAML")?;
 
+    // Salva la configurazione di esempio
+    fs::write(path, yaml_content)
+        .context(format!("Impossibile salvare la configurazione di esempio in: {:?}", path))?;
+
+    info!("Configurazione di esempio creata in: {:?}", path);
     Ok(())
 }

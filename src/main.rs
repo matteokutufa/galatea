@@ -1,7 +1,8 @@
 use std::path::Path;
 use std::process;
+use std::fs;
 use clap::{Arg, Command};
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, anyhow};
 
 mod config;
 mod downloader;
@@ -16,6 +17,13 @@ use crate::config::{Config, create_example_config};
 use crate::ui::app::run_app;
 
 fn main() -> Result<()> {
+    // Verifica se l'applicazione è eseguita come root
+    if !utils::is_running_as_root() {
+        eprintln!("Errore: Galatea deve essere eseguito con privilegi di root.");
+        eprintln!("Riprova con 'sudo galatea'");
+        process::exit(1);
+    }
+
     // Parsing degli argomenti da linea di comando
     let matches = Command::new("Galatea")
         .version("0.1.0")
@@ -34,7 +42,21 @@ fn main() -> Result<()> {
 
     // Gestione dell'opzione per creare un file di configurazione di esempio
     if let Some(example_path) = matches.get_one::<String>("create-example") {
-        match create_example_config(Path::new(example_path)) {
+        println!("Tentativo di creare config in: {}", example_path);
+        
+        let path = Path::new(example_path);
+        if let Some(parent) = path.parent() {
+            println!("Directory genitore: {:?}", parent);
+            println!("Esiste directory genitore: {}", parent.exists());
+            
+            // Tenta di creare manualmente la directory
+            match fs::create_dir_all(parent) {
+                Ok(_) => println!("Directory creata con successo"),
+                Err(e) => println!("Errore nella creazione directory: {}", e)
+            }
+        }
+        
+        match create_example_config(path) {
             Ok(_) => {
                 println!("File di configurazione di esempio creato con successo in: {}", example_path);
                 process::exit(0);
@@ -59,7 +81,7 @@ fn main() -> Result<()> {
         }
     };
 
-    // Avvio dell'applicazione senza logging
+    // Avvio dell'applicazione
     run_app(config).context("Errore durante l'esecuzione dell'applicazione")?;
 
     Ok(())
