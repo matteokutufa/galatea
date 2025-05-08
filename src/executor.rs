@@ -159,8 +159,8 @@ pub fn run_bash_script(script_path: &Path, args: &[&str]) -> Result<()> {
     let mut child = Command::new(&script)
         .args(args)
         .current_dir(script.parent().unwrap_or(Path::new(".")))
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        //.stdout(Stdio::inherit())
+        //.stderr(Stdio::inherit())
         .spawn()
         .context(format!("Failed to execute script: {:?}", script))?;
 
@@ -169,6 +169,7 @@ pub fn run_bash_script(script_path: &Path, args: &[&str]) -> Result<()> {
         .context(format!("Failed to wait for script: {:?}", script))?;
 
     if !status.success() {
+
         return Err(anyhow!(
             "Script failed with exit code: {}",
             status.code().unwrap_or(-1)
@@ -197,7 +198,10 @@ pub fn run_ansible_playbook(playbook_path: &Path, tag: &str) -> Result<()> {
         let possible_playbooks = &[
             "playbook.yml", "playbook.yaml", 
             "main.yml", "main.yaml", 
-            "site.yml", "site.yaml"
+            "site.yml", "site.yaml",
+            "local.yml", "local.yaml",
+            "install.yml", "install.yaml",
+            "entrypoint.yml", "entrypoint.yaml"
         ];
         find_script_in_dir(playbook_path, possible_playbooks)?
     } else {
@@ -222,6 +226,12 @@ pub fn run_ansible_playbook(playbook_path: &Path, tag: &str) -> Result<()> {
 
     // Esegui il playbook
     info!("Executing ansible-playbook with command: ansible-playbook -i localhost, --connection=local --tags={} {:?}", tag, playbook);
+    unsafe {
+        std::env::set_var("ANSIBLE_LOG_PATH", "/var/log/galatea/ansible.log");
+        std::env::set_var("ANSIBLE_DISPLAY_ARGS_TO_STDOUT", "no");
+        std::env::set_var("ANSIBLE_NO_LOG", "true");
+        std::env::set_var("ANSIBLE_STDOUT_CALLBACK", "null");
+    }
     let mut child = Command::new("ansible-playbook")
         .arg("-i")
         .arg("localhost,")
@@ -229,8 +239,8 @@ pub fn run_ansible_playbook(playbook_path: &Path, tag: &str) -> Result<()> {
         .arg(format!("--tags={}", tag))
         .arg(&playbook)
         .current_dir(playbook.parent().unwrap_or(Path::new(".")))
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        //.stdout(Stdio::inherit())
+        //.stderr(Stdio::inherit())
         .spawn()
         .context(format!("Failed to execute ansible playbook: {:?}", playbook))?;
 

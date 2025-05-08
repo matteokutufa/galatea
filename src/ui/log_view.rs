@@ -223,4 +223,16 @@ pub fn show_recent_logs_popup(siv: &mut Cursive) {
         .fixed_height(WINDOW_HEIGHT - 5));
 }
 
+// Aggiungi questa funzione in src/ui/log_view.rs
+pub fn update_operation_log(siv: &mut Cursive, message: &str) {
+    siv.call_on_name("operation_log_area", |view: &mut ScrollView<TextView>| {
+        let current_content = view.get_inner().get_content().source().to_string();
+        let new_content = format!("{}\n{}", current_content, message);
+        view.get_inner_mut().set_content(new_content);
+        
+        // Scorri automaticamente verso il basso
+        view.scroll_to_bottom();
+    });
+}
+
 

@@ -4,14 +4,13 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Result, anyhow};
 
 use cursive::Cursive;
-use cursive::views::{Dialog, SelectView, TextView, LinearLayout, DummyView, Panel, TextContent, Button, OnEventView};
+use cursive::views::{Dialog, SelectView, TextView, LinearLayout, DummyView, Panel, TextContent, Button, OnEventView, ScrollView};
 use cursive::view::Scrollable;
 use cursive::traits::*;
 use cursive::align::HAlign;
 use cursive::event::{Event, Key};
 
 use crate::config::Config;
-use crate::ui::app::{WINDOW_WIDTH, WINDOW_HEIGHT, PANEL_WIDTH, PANEL_HEIGHT};
 use crate::ui::log_view;
 use crate::ui::components::selection::{SelectableItem, SharedSelection};
 
@@ -80,6 +79,9 @@ where
     let selection_clone = Arc::clone(&selection);
     let select_view = select_view.with_name("item_list");
     
+    // Clone items for the on_event closure
+    let items_for_event = Arc::clone(&items);
+    
     // Avvolgi con OnEventView per gestire gli eventi
     let select_view_with_events = OnEventView::new(select_view)
     .on_event(Event::Key(Key::Enter), move |s| {
@@ -98,17 +100,25 @@ where
                     if let Some((item_label, _)) = view.get_item(idx) {
                         let item_label = item_label.to_string();
                         
-                        // Aggiorna l'etichetta basata sulla selezione
+                        // Aggiorna l'etichetta basata sulla selezione - CORREZIONE
                         let new_label = if is_selected {
-                            format!("[*] {}", item_label.trim_start_matches("[").split(']').nth(1).unwrap_or(""))
+                            if item_label.starts_with("[ ]") {
+                                item_label.replacen("[ ]", "[*]", 1)
+                            } else if item_label.starts_with("[✓]") {
+                                item_label.replacen("[✓]", "[*]", 1)
+                            } else if item_label.starts_with("[!]") {
+                                item_label.replacen("[!]", "[*]", 1)
+                            } else {
+                                format!("[*]{}", &item_label[3..])
+                            }
                         } else {
                             // Ripristina lo stato originale
                             if item_label.contains("[✓]") {
-                                format!("[✓]{}", item_label.trim_start_matches("[*]").split(']').nth(1).unwrap_or(""))
+                                item_label.replacen("[*]", "[✓]", 1)
                             } else if item_label.contains("[!]") {
-                                format!("[!]{}", item_label.trim_start_matches("[*]").split(']').nth(1).unwrap_or(""))
+                                item_label.replacen("[*]", "[!]", 1)
                             } else {
-                                format!("[ ]{}", item_label.trim_start_matches("[*]").split(']').nth(1).unwrap_or(""))
+                                item_label.replacen("[*]", "[ ]", 1)
                             }
                         };
                         
@@ -122,6 +132,29 @@ where
                             view.set_selection(val);
                         }
                     }
+                });
+                
+                // Aggiorna l'area dei log
+                s.call_on_name("log_scroll_view", |view: &mut ScrollView<TextView>| {
+                    let current_text = view.get_inner().get_content().source().to_string();
+                    let item_name = if let Ok(items_guard) = items_for_event.lock() { // Use items_for_event here
+                        if let Some(item) = items_guard.get(idx) {
+                            format!("{}", item)
+                        } else {
+                            "elemento sconosciuto".to_string()
+                        }
+                    } else {
+                        "elemento sconosciuto".to_string()
+                    };
+                    
+                    let msg = if is_selected {
+                        format!("Elemento selezionato: {}", item_name)
+                    } else {
+                        format!("Elemento deselezionato: {}", item_name)
+                    };
+                    
+                    view.get_inner_mut().set_content(format!("{}\n{}", current_text, msg));
+                    view.scroll_to_bottom();
                 });
             }
         }
@@ -175,9 +208,17 @@ where
                             }
                         };
 
+                        // CORREZIONE: Preserva l'etichetta completa
                         let display_str = if is_selected {
-                            let without_marker = item_str.trim_start_matches("[").split(']').nth(1).unwrap_or("");
-                            format!("[*]{}", without_marker)
+                            if item_str.starts_with("[ ]") {
+                                item_str.replacen("[ ]", "[*]", 1)
+                            } else if item_str.starts_with("[✓]") {
+                                item_str.replacen("[✓]", "[*]", 1)
+                            } else if item_str.starts_with("[!]") {
+                                item_str.replacen("[!]", "[*]", 1)
+                            } else {
+                                format!("[*]{}", &item_str[3..])
+                            }
                         } else {
                             item_str.clone()
                         };
@@ -242,6 +283,13 @@ where
                         
                         s.add_layer(progress_view);
                         
+                        // Aggiorna l'area dei log
+                        s.call_on_name("log_scroll_view", |view: &mut ScrollView<TextView>| {
+                            let current_text = view.get_inner().get_content().source().to_string();
+                            view.get_inner_mut().set_content(format!("{}\nAvvio installazione elementi selezionati...", current_text));
+                            view.scroll_to_bottom();
+                        });
+                        
                         let mut success_count = 0;
                         let mut error_messages = Vec::new();
                         
@@ -270,6 +318,15 @@ where
                                 progress_text.set_content(format!("Installazione dell'elemento {} ({}/{})...", 
                                                                 item, i+1, selected_indices.len()));
                                 
+                                // Aggiorna l'area dei log
+                                s.call_on_name("log_scroll_view", |view: &mut ScrollView<TextView>| {
+                                    let current_text = view.get_inner().get_content().source().to_string();
+                                    let msg = format!("Installazione dell'elemento {} ({}/{})...", 
+                                                    item, i+1, selected_indices.len());
+                                    view.get_inner_mut().set_content(format!("{}\n{}", current_text, msg));
+                                    view.scroll_to_bottom();
+                                });
+                                
                                 let config_guard = match config.lock() {
                                     Ok(guard) => guard,
                                     Err(e) => {
@@ -282,8 +339,24 @@ where
                             };
                             
                             match result {
-                                Ok(_) => success_count += 1,
-                                Err(e) => error_messages.push(format!("Errore nell'operazione su {}: {}", idx, e)),
+                                Ok(_) => {
+                                    success_count += 1;
+                                    // Aggiorna l'area dei log
+                                    s.call_on_name("log_scroll_view", |view: &mut ScrollView<TextView>| {
+                                        let current_text = view.get_inner().get_content().source().to_string();
+                                        view.get_inner_mut().set_content(format!("{}\nCompletato con successo", current_text));
+                                        view.scroll_to_bottom();
+                                    });
+                                },
+                                Err(e) => {
+                                    error_messages.push(format!("Errore nell'operazione su {}: {}", idx, e));
+                                    // Aggiorna l'area dei log
+                                    s.call_on_name("log_scroll_view", |view: &mut ScrollView<TextView>| {
+                                        let current_text = view.get_inner().get_content().source().to_string();
+                                        view.get_inner_mut().set_content(format!("{}\nErrore: {}", current_text, e));
+                                        view.scroll_to_bottom();
+                                    });
+                                }
                             }
                         }
                         
@@ -293,6 +366,13 @@ where
                             s.add_layer(Dialog::info(format!("Tutti i {} elementi sono stati elaborati con successo", success_count))
                                          .fixed_width(60)
                                          .fixed_height(10));
+                                         
+                            // Aggiorna l'area dei log
+                            s.call_on_name("log_scroll_view", |view: &mut ScrollView<TextView>| {
+                                let current_text = view.get_inner().get_content().source().to_string();
+                                view.get_inner_mut().set_content(format!("{}\nInstallazione completata con successo per tutti gli elementi", current_text));
+                                view.scroll_to_bottom();
+                            });
                         } else {
                             let mut result_message = format!("Operazioni completate con successo: {}/{}\n\nErrori:\n", 
                                                           success_count, selected_indices.len());
@@ -305,10 +385,17 @@ where
                                 .button("OK", |s| { s.pop_layer(); })
                                 .fixed_width(70)
                                 .fixed_height(15));
+                                
+                            // Aggiorna l'area dei log
+                            s.call_on_name("log_scroll_view", |view: &mut ScrollView<TextView>| {
+                                let current_text = view.get_inner().get_content().source().to_string();
+                                view.get_inner_mut().set_content(format!("{}\nInstallazione completata con errori. Successi: {}/{}",
+                                                     current_text, success_count, selected_indices.len()));
+                                view.scroll_to_bottom();
+                            });
                         }
                         
                         update_ui(&items, &selection_for_update, &selection_info, &cb_sink);
-                        log_view::show_recent_logs_popup(s);
                     }
                 })
                 .fixed_width(60)
@@ -329,6 +416,27 @@ where
                 Some(Some(idx)) => idx,
                 _ => return,
             };
+
+            // Ottieni il nome dell'elemento per il log
+            let item_name = {
+                if let Ok(items_guard) = items.lock() {
+                    if let Some(item) = items_guard.get(idx) {
+                        format!("{}", item)
+                    } else {
+                        "elemento sconosciuto".to_string()
+                    }
+                } else {
+                    "elemento sconosciuto".to_string()
+                }
+            };
+            
+            // Aggiorna l'area dei log
+            s.call_on_name("log_scroll_view", |view: &mut ScrollView<TextView>| {
+                let current_text = view.get_inner().get_content().source().to_string();
+                let msg = format!("Installazione di {}...", item_name);
+                view.get_inner_mut().set_content(format!("{}\n{}", current_text, msg));
+                view.scroll_to_bottom();
+            });
 
             let item_result = {
                 let mut items_guard = match items.lock() {
@@ -376,6 +484,15 @@ where
                     s.add_layer(Dialog::info("Operazione installazione completata con successo")
                                  .fixed_width(50)
                                  .fixed_height(7));
+                    
+                    // Aggiorna l'area dei log
+                    s.call_on_name("log_scroll_view", |view: &mut ScrollView<TextView>| {
+                        let current_text = view.get_inner().get_content().source().to_string();
+                        let msg = format!("Operazione completata con successo per {}", item_name);
+                        view.get_inner_mut().set_content(format!("{}\n{}", current_text, msg));
+                        view.scroll_to_bottom();
+                    });
+                    
                     update_ui(&items, &selection, &selection_info, &cb_sink);
                     log_view::show_recent_logs_popup(s);
                 },
@@ -383,6 +500,14 @@ where
                     s.add_layer(Dialog::info(format!("Errore durante l'operazione installazione: {}", e))
                                  .fixed_width(50)
                                  .fixed_height(7));
+                    
+                    // Aggiorna l'area dei log
+                    s.call_on_name("log_scroll_view", |view: &mut ScrollView<TextView>| {
+                        let current_text = view.get_inner().get_content().source().to_string();
+                        let msg = format!("Errore durante l'installazione di {}: {}", item_name, e);
+                        view.get_inner_mut().set_content(format!("{}\n{}", current_text, msg));
+                        view.scroll_to_bottom();
+                    });
                 }
             }
         }
@@ -395,15 +520,30 @@ where
         let selection_info = selection_info.clone();
         let cb_sink = siv.cb_sink().clone();
         
-        Button::new("Pulisci Selezione", move |_s| {
+        Button::new("Pulisci Selezione", move |s| {
             {
                 if let Ok(mut sel) = selection.lock() {
                     sel.clear();
                 }
             }
+            
+            // Aggiorna l'area dei log
+            s.call_on_name("log_scroll_view", |view: &mut ScrollView<TextView>| {
+                let current_text = view.get_inner().get_content().source().to_string();
+                let msg = "Selezione elementi pulita";
+                view.get_inner_mut().set_content(format!("{}\n{}", current_text, msg));
+                view.scroll_to_bottom();
+            });
+            
             update_ui(&items, &selection, &selection_info, &cb_sink);
         })
     };
+
+    // Area di log nella parte inferiore - CORREZIONE: Aggiunto ScrollView con nome
+    let log_text = TextView::new("Log operazioni:");
+    let log_scroll_view = ScrollView::new(log_text)
+        .with_name("log_scroll_view")
+        .fixed_height(5);  // Altezza fissa di 5 righe
 
     // NUOVO LAYOUT RISTRUTTURATO
     
@@ -429,14 +569,17 @@ where
         .child(DummyView.fixed_width(1))
         .child(clear_selection_button);
     
-    // 4. Layout principale con allineamento verticale
+    // 4. Layout principale con allineamento verticale - AGGIUNTO PANNELLO LOG
     let layout = LinearLayout::vertical()
         .child(main_container)
         .child(DummyView.fixed_height(1))
         .child(selection_bar)
         .child(DummyView.fixed_height(1))
         .child(Panel::new(buttons_bar)
-            .title("Azioni"));
+            .title("Azioni"))
+        .child(DummyView.fixed_height(1))
+        .child(Panel::new(log_scroll_view)
+            .title("Log operazioni"));
 
     // Dialog esterno con dimensioni fisse
     siv.add_layer(Dialog::around(layout)

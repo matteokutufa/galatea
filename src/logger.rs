@@ -19,7 +19,7 @@ lazy_static! {
     static ref LOG_INITIALIZED: AtomicBool = AtomicBool::new(false);
 }
 
-/// Inizializza il sistema di logging su file (sia su file che su console)
+/// Inizializza il sistema di logging su file (solo su file, non su console)
 pub fn init_file_logger(log_dir: &str) -> Result<()> {
     // Verifica se il logger è già stato inizializzato
     if LOG_INITIALIZED.load(Ordering::SeqCst) {
@@ -59,7 +59,7 @@ pub fn init_file_logger(log_dir: &str) -> Result<()> {
         *log_file_guard = Some(file);
     }
 
-    // Configura il logger per scrivere sul file e su stdout
+    // Configura il logger per scrivere solo sul file (non su stdout)
     env_logger::Builder::from_default_env()
         .format(|buf, record| {
             let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
@@ -110,8 +110,8 @@ pub fn log_to_file(message: &str) -> Result<()> {
         }
     }
 
-    // Scrivi anche sulla console
-    println!("{}", formatted.trim());
+    // Non scrivere sulla console (rimosso)
+    // println!("{}", formatted.trim());
 
     Ok(())
 }
@@ -185,7 +185,7 @@ pub fn read_log_file(path: &Path) -> Result<String> {
     Ok(content)
 }
 
-/// Implementazione di un logger personalizzato che scrive sia su file che su console
+/// Implementazione di un logger personalizzato che scrive solo su file (non su console)
 pub struct FileAndConsoleLogger;
 
 impl log::Log for FileAndConsoleLogger {
@@ -212,8 +212,8 @@ impl log::Log for FileAndConsoleLogger {
                 }
             }
 
-            // Scrivi anche sulla console
-            println!("{}", formatted.trim());
+            // Non scrivere sulla console (rimosso)
+            // println!("{}", formatted.trim());
         }
     }
 
@@ -225,4 +225,3 @@ impl log::Log for FileAndConsoleLogger {
         }
     }
 }
-
