@@ -512,4 +512,3 @@ fn get_statistics(tasks: &Arc<Mutex<Vec<Task>>>, stacks: &Arc<Mutex<Vec<Stack>>>
 
     Ok(stats)
 }
-

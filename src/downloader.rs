@@ -356,4 +356,3 @@ pub fn write_string_to_file(path: &Path, content: &str) -> Result<()> {
     fs::write(path, content)
         .context(format!("Failed to write file: {:?}", path))
 }
-

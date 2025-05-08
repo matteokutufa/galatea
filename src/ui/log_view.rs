@@ -234,5 +234,3 @@ pub fn update_operation_log(siv: &mut Cursive, message: &str) {
         view.scroll_to_bottom();
     });
 }
-
-
