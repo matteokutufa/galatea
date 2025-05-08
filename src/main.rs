@@ -22,13 +22,6 @@ fn main() -> Result<()> {
     // Configura i gestori di segnali
     setup_signal_handlers()?;
 
-    // Verifica se l'applicazione è eseguita come root
-    if !utils::is_running_as_root() {
-        eprintln!("Errore: Galatea deve essere eseguito con privilegi di root.");
-        eprintln!("Riprova con 'sudo galatea'");
-        process::exit(1);
-    }
-
     // Parsing degli argomenti da linea di comando
     let matches = Command::new("Galatea")
         .version("0.1.0")
@@ -43,10 +36,36 @@ fn main() -> Result<()> {
             .long("create-example")
             .value_name("FILE")
             .help("Crea un file di configurazione di esempio"))
+        .arg(Arg::new("log-dir")
+            .long("log-dir")
+            .value_name("DIR")
+            .help("Specifica una directory per i file di log"))
+        .arg(Arg::new("no-root-check")
+            .long("no-root-check")
+            .help("Disabilita il controllo dei permessi di root"))
         .get_matches();
+
+    // Configura il logger il prima possibile
+    let log_dir = matches.get_one::<String>("log-dir")
+        .map(|s| s.as_str())
+        .unwrap_or("/var/log/galatea");
+
+    // Inizializza il logger
+    logger::init_file_logger(log_dir)?;
+    log::info!("Galatea è stata avviata");
+
+    // Verifica se l'applicazione è eseguita come root (a meno che --no-root-check sia specificato)
+    if !matches.contains_id("no-root-check") && !utils::is_running_as_root() {
+        log::error!("Galatea deve essere eseguito con privilegi di root");
+        eprintln!("Errore: Galatea deve essere eseguito con privilegi di root.");
+        eprintln!("Riprova con 'sudo galatea'");
+        eprintln!("(Puoi disabilitare questo controllo con --no-root-check)");
+        process::exit(1);
+    }
 
     // Gestione dell'opzione per creare un file di configurazione di esempio
     if let Some(example_path) = matches.get_one::<String>("create-example") {
+        log::info!("Tentativo di creare config di esempio in: {}", example_path);
         println!("Tentativo di creare config in: {}", example_path);
         
         let path = Path::new(example_path);
@@ -63,10 +82,12 @@ fn main() -> Result<()> {
         
         match create_example_config(path) {
             Ok(_) => {
+                log::info!("File di configurazione di esempio creato con successo in: {}", example_path);
                 println!("File di configurazione di esempio creato con successo in: {}", example_path);
                 process::exit(0);
             },
             Err(e) => {
+                log::error!("Errore durante la creazione del file di configurazione di esempio: {}", e);
                 eprintln!("Errore durante la creazione del file di configurazione di esempio: {}", e);
                 process::exit(1);
             }
@@ -77,9 +98,11 @@ fn main() -> Result<()> {
     let config_path = matches.get_one::<String>("config").map(|s| s.as_str());
     let config = match Config::load(config_path) {
         Ok(config) => {
+            log::info!("Configurazione caricata con successo");
             config
         },
         Err(e) => {
+            log::error!("Errore durante il caricamento della configurazione: {}", e);
             eprintln!("Errore durante il caricamento della configurazione: {}", e);
             eprintln!("Prova ad eseguire il programma con l'opzione --create-example per creare una configurazione di esempio");
             process::exit(1);
@@ -87,7 +110,18 @@ fn main() -> Result<()> {
     };
 
     // Avvio dell'applicazione
-    run_app(config).context("Errore durante l'esecuzione dell'applicazione")?;
+    log::info!("Avvio dell'interfaccia utente");
+    match run_app(config) {
+        Ok(_) => {
+            log::info!("Applicazione terminata con successo");
+            println!("Applicazione terminata con successo");
+        },
+        Err(e) => {
+            log::error!("Errore durante l'esecuzione dell'applicazione: {}", e);
+            eprintln!("Errore durante l'esecuzione dell'applicazione: {}", e);
+            process::exit(1);
+        }
+    }
 
     Ok(())
 }
@@ -106,6 +140,7 @@ fn setup_signal_handlers() -> Result<()> {
         std::thread::spawn(move || {
             if !running.load(Ordering::SeqCst) {
                 println!("\nRicevuto segnale di interruzione, chiusura in corso...");
+                log::info!("Ricevuto segnale di interruzione, chiusura in corso...");
                 std::process::exit(130); // Exit con codice standard per SIGINT
             }
         });

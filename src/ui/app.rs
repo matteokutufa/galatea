@@ -4,14 +4,16 @@
 
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
+use std::fs;
 
 use anyhow::{Result, anyhow};
 
 use cursive::Cursive;
-use cursive::views::{Dialog, TextView, LinearLayout, SelectView, DummyView, Panel, EditView};
+use cursive::views::{Dialog, TextView, LinearLayout, SelectView, DummyView, Panel, EditView, ScrollView};
 use cursive::view::Scrollable;
 use cursive::traits::*;
 use cursive::align::HAlign;
+use cursive::event::{Event, Key};
 
 use crate::config::{Config, get_binary_config_path};
 use crate::task::{Task, load_tasks, ScriptType};
@@ -19,6 +21,15 @@ use crate::stack::{Stack, load_stacks};
 use crate::ui::theme;
 use crate::ui::task_view;
 use crate::ui::stack_view;
+use crate::ui::log_view;
+use crate::logger;
+
+// Dimensioni standard per le finestre
+pub const WINDOW_WIDTH: usize = 80;
+pub const WINDOW_HEIGHT: usize = 24;
+pub const PANEL_WIDTH: usize = 78;
+pub const PANEL_HEIGHT: usize = 16;
+pub const LOG_HEIGHT: usize = 10;
 
 // In `ui/app.rs`
 pub struct App;
@@ -40,6 +51,11 @@ pub fn run_app(config: Config) -> Result<()> {
     let config = Arc::new(Mutex::new(config));
     let tasks = Arc::new(Mutex::new(tasks));
     let stacks = Arc::new(Mutex::new(stacks));
+
+    // Aggiungi gestori di eventi globali
+    siv.add_global_callback(Event::Key(Key::F1), move |s| {
+        log_view::create_log_view(s);
+    });
 
     // Crea la schermata principale
     create_main_screen(&mut siv, Arc::clone(&config), Arc::clone(&tasks), Arc::clone(&stacks))?;
@@ -75,6 +91,7 @@ fn create_main_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Arc<
     // Aggiungi le voci di menu
     main_menu.add_item("Gestione Task", "tasks");
     main_menu.add_item("Gestione Stack", "stacks");
+    main_menu.add_item("Visualizza Log", "logs");
     main_menu.add_item("Impostazioni", "settings");
     main_menu.add_item("Informazioni", "about");
     main_menu.add_item("Esci", "quit");
@@ -89,14 +106,21 @@ fn create_main_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Arc<
             "tasks" => {
                 let result = task_view::create_task_view(s, Arc::clone(&config_clone), Arc::clone(&tasks_clone));
                 if let Err(e) = result {
-                    s.add_layer(Dialog::info(format!("Errore durante il caricamento della vista dei task: {}", e)));
+                    s.add_layer(Dialog::info(format!("Errore durante il caricamento della vista dei task: {}", e))
+                                 .fixed_width(50)
+                                 .fixed_height(10));
                 }
             },
             "stacks" => {
                 let result = stack_view::create_stack_view(s, Arc::clone(&config_clone), Arc::clone(&stacks_clone), Arc::clone(&tasks_clone));
                 if let Err(e) = result {
-                    s.add_layer(Dialog::info(format!("Errore durante il caricamento della vista degli stack: {}", e)));
+                    s.add_layer(Dialog::info(format!("Errore durante il caricamento della vista degli stack: {}", e))
+                                 .fixed_width(50)
+                                 .fixed_height(10));
                 }
+            },
+            "logs" => {
+                log_view::create_log_view(s);
             },
             "settings" => {
                 create_settings_screen(s, Arc::clone(&config_clone));
@@ -106,17 +130,27 @@ fn create_main_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Arc<
                     "Galatea v0.1.0\n\n\
                     Strumento di installazione e configurazione server e workstation\n\n\
                     Basato su Rust con interfaccia TUI gestita da cursive."
-                ).title("Informazioni"));
+                ).title("Informazioni")
+                 .fixed_width(WINDOW_WIDTH)
+                 .fixed_height(WINDOW_HEIGHT));
             },
             "quit" => {
                 s.add_layer(Dialog::around(TextView::new("Sei sicuro di voler uscire?"))
                     .title("Conferma uscita")
                     .button("No", |s| { s.pop_layer(); })
-                    .button("Sì", |s| s.quit()));
+                    .button("Sì", |s| s.quit())
+                    .fixed_width(50)
+                    .fixed_height(10));
             },
-            _ => s.add_layer(Dialog::info(format!("Opzione non implementata: {}", item))),
+            _ => s.add_layer(Dialog::info(format!("Opzione non implementata: {}", item))
+                             .fixed_width(50)
+                             .fixed_height(10)),
         }
     });
+
+    // Aiuto per i tasti funzione
+    let help_text = TextView::new("F1: Visualizza Log | F10: Menu")
+        .h_align(HAlign::Center);
 
     // Layout principale
     let layout = LinearLayout::vertical()
@@ -125,10 +159,15 @@ fn create_main_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Arc<
         .child(description)
         .child(DummyView.fixed_height(1))
         .child(Panel::new(stats_view)
-            .title("Statistiche"))
+            .title("Statistiche")
+            .fixed_width(PANEL_WIDTH))
         .child(DummyView.fixed_height(1))
         .child(Panel::new(main_menu.scrollable())
-            .title("Menu principale"));
+            .title("Menu principale")
+            .fixed_width(PANEL_WIDTH)
+            .fixed_height(10))
+        .child(DummyView.fixed_height(1))
+        .child(help_text);
 
     // Aggiungi la vista alla UI
     siv.add_layer(Dialog::around(layout)
@@ -137,8 +176,12 @@ fn create_main_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Arc<
             s.add_layer(Dialog::around(TextView::new("Sei sicuro di voler uscire?"))
                 .title("Conferma uscita")
                 .button("No", |s| { s.pop_layer(); })
-                .button("Sì", |s| s.quit()));
-        }));
+                .button("Sì", |s| s.quit())
+                .fixed_width(50)
+                .fixed_height(10));
+        })
+        .fixed_width(WINDOW_WIDTH)
+        .fixed_height(WINDOW_HEIGHT));
 
     Ok(())
 }
@@ -218,7 +261,9 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                             match config_guard.save(config_path) {
                                 Ok(_) => {},
                                 Err(e) => {
-                                    s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e)));
+                                    s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e))
+                                                 .fixed_width(50)
+                                                 .fixed_height(10));
                                     return;
                                 }
                             }
@@ -230,7 +275,9 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                     s.set_theme(new_theme);
 
                     // Notifica l'utente
-                    s.add_layer(Dialog::info(format!("Tema cambiato a: {}", theme_name)));
+                    s.add_layer(Dialog::info(format!("Tema cambiato a: {}", theme_name))
+                                 .fixed_width(50)
+                                 .fixed_height(10));
                     s.pop_layer();
                 });
 
@@ -260,7 +307,9 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                             }).unwrap().to_string();
 
                             if url.is_empty() {
-                                s.add_layer(Dialog::info("L'URL non può essere vuoto"));
+                                s.add_layer(Dialog::info("L'URL non può essere vuoto")
+                                             .fixed_width(50)
+                                             .fixed_height(10));
                                 return;
                             }
 
@@ -273,18 +322,26 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                                         match config_guard.save(config_path) {
                                             Ok(_) => {
                                                 s.pop_layer();
-                                                s.add_layer(Dialog::info(format!("Sorgente Task aggiunta: {}", url)));
+                                                s.add_layer(Dialog::info(format!("Sorgente Task aggiunta: {}", url))
+                                                             .fixed_width(50)
+                                                             .fixed_height(10));
                                             },
                                             Err(e) => {
-                                                s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e)));
+                                                s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e))
+                                                             .fixed_width(50)
+                                                             .fixed_height(10));
                                             }
                                         }
                                     } else {
                                         s.pop_layer();
-                                        s.add_layer(Dialog::info(format!("Sorgente Task aggiunta: {}", url)));
+                                        s.add_layer(Dialog::info(format!("Sorgente Task aggiunta: {}", url))
+                                                     .fixed_width(50)
+                                                     .fixed_height(10));
                                     }
                                 } else {
-                                    s.add_layer(Dialog::info(format!("La sorgente {} esiste già", url)));
+                                    s.add_layer(Dialog::info(format!("La sorgente {} esiste già", url))
+                                                 .fixed_width(50)
+                                                 .fixed_height(10));
                                 }
                             }
                         }
@@ -311,7 +368,9 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                             }).unwrap().to_string();
 
                             if url.is_empty() {
-                                s.add_layer(Dialog::info("L'URL non può essere vuoto"));
+                                s.add_layer(Dialog::info("L'URL non può essere vuoto")
+                                             .fixed_width(50)
+                                             .fixed_height(10));
                                 return;
                             }
 
@@ -324,18 +383,26 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                                         match config_guard.save(config_path) {
                                             Ok(_) => {
                                                 s.pop_layer();
-                                                s.add_layer(Dialog::info(format!("Sorgente Stack aggiunta: {}", url)));
+                                                s.add_layer(Dialog::info(format!("Sorgente Stack aggiunta: {}", url))
+                                                             .fixed_width(50)
+                                                             .fixed_height(10));
                                             },
                                             Err(e) => {
-                                                s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e)));
+                                                s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e))
+                                                             .fixed_width(50)
+                                                             .fixed_height(10));
                                             }
                                         }
                                     } else {
                                         s.pop_layer();
-                                        s.add_layer(Dialog::info(format!("Sorgente Stack aggiunta: {}", url)));
+                                        s.add_layer(Dialog::info(format!("Sorgente Stack aggiunta: {}", url))
+                                                     .fixed_width(50)
+                                                     .fixed_height(10));
                                     }
                                 } else {
-                                    s.add_layer(Dialog::info(format!("La sorgente {} esiste già", url)));
+                                    s.add_layer(Dialog::info(format!("La sorgente {} esiste già", url))
+                                                 .fixed_width(50)
+                                                 .fixed_height(10));
                                 }
                             }
                         }
@@ -377,7 +444,9 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                             }).unwrap().to_string();
 
                             if path.is_empty() {
-                                s.add_layer(Dialog::info("Il percorso non può essere vuoto"));
+                                s.add_layer(Dialog::info("Il percorso non può essere vuoto")
+                                             .fixed_width(50)
+                                             .fixed_height(10));
                                 return;
                             }
 
@@ -389,10 +458,14 @@ fn create_settings_screen(siv: &mut Cursive, config: Arc<Mutex<Config>>) {
                                         // Aggiorna il percorso nella configurazione
                                         config_guard.config_file_path = Some(PathBuf::from(&path));
                                         s.pop_layer();
-                                        s.add_layer(Dialog::info(format!("Configurazione salvata in: {}", path)));
+                                        s.add_layer(Dialog::info(format!("Configurazione salvata in: {}", path))
+                                                     .fixed_width(50)
+                                                     .fixed_height(10));
                                     },
                                     Err(e) => {
-                                        s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e)));
+                                        s.add_layer(Dialog::info(format!("Errore nel salvataggio della configurazione: {}", e))
+                                                     .fixed_width(50)
+                                                     .fixed_height(10));
                                     }
                                 }
                             }
