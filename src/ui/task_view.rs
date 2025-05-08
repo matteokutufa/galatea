@@ -1124,3 +1124,4 @@ pub fn create_task_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, tasks: Ar
 
     Ok(())
 }
+

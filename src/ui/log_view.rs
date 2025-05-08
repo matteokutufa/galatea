@@ -222,3 +222,5 @@ pub fn show_recent_logs_popup(siv: &mut Cursive) {
         .fixed_width(WINDOW_WIDTH - 10)
         .fixed_height(WINDOW_HEIGHT - 5));
 }
+
+

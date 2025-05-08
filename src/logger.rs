@@ -225,3 +225,4 @@ impl log::Log for FileAndConsoleLogger {
         }
     }
 }
+

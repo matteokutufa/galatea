@@ -1230,3 +1230,5 @@ pub fn create_stack_view(siv: &mut Cursive, config: Arc<Mutex<Config>>, stacks: 
 
     Ok(())
 }
+
+
