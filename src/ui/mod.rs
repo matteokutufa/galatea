@@ -7,4 +7,4 @@ pub mod task_view;
 pub mod stack_view;
 pub mod theme;
 pub mod log_view;
-
+pub mod components;
