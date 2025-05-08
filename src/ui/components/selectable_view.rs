@@ -1,4 +1,4 @@
-// File: src/ui/components/selectable_view.rs
+// Soluzione completa: Ristrutturazione del file src/ui/components/selectable_view.rs
 
 use std::sync::{Arc, Mutex};
 use anyhow::{Result, anyhow};
@@ -132,8 +132,7 @@ where
     let selection_info_view = TextView::new_with_content(selection_info.clone())
         .h_align(HAlign::Center);
 
-    // Funzione di aggiornamento UI - implementata come funzione libera
-    // che verrà chiamata direttamente dalle closure dei bottoni
+    // Funzione di aggiornamento UI
     fn update_ui<T: Send + Sync + 'static, E: SelectableItem + Clone + 'static>(
         items: &Arc<Mutex<Vec<E>>>,
         selection: &SharedSelection<T>,
@@ -141,17 +140,14 @@ where
         cb_sink: &cursive::CbSink,
     ) {
         if let Ok(items_guard) = items.lock() {
-            // Raccogli i dati necessari per l'aggiornamento
             let items_data: Vec<(String, usize)> = items_guard.iter().enumerate()
                 .map(|(idx, item)| (item.format_for_list(), idx))
                 .collect();
 
-            // Clona ciò che serve per il callback
             let items_data = items_data.clone();
             let selection = Arc::clone(selection);
             let selection_info_content = selection_info_content.clone();
             
-            // Invia i dati al callback
             if let Err(_) = cb_sink.send(Box::new(move |s: &mut Cursive| {
                 let selection_count = {
                     if let Ok(sel) = selection.lock() {
@@ -161,14 +157,12 @@ where
                     }
                 };
 
-                // Aggiorna il testo informativo
                 if selection_count > 0 {
                     selection_info_content.set_content(format!("Premi 'Invio' per selezionare/deselezionare. {} elementi selezionati.", selection_count));
                 } else {
                     selection_info_content.set_content("Premi 'Invio' per selezionare/deselezionare. Nessun elemento selezionato.".to_string());
                 }
 
-                // Aggiorna la lista
                 s.call_on_name("item_list", |view: &mut SelectView<usize>| {
                     view.clear();
 
@@ -182,7 +176,6 @@ where
                         };
 
                         let display_str = if is_selected {
-                            // Sostituisci il marker di stato con [*]
                             let without_marker = item_str.trim_start_matches("[").split(']').nth(1).unwrap_or("");
                             format!("[*]{}", without_marker)
                         } else {
@@ -198,7 +191,9 @@ where
         }
     }
 
-    // Crea i bottoni per le azioni
+    // BOTTONI PER LE AZIONI
+    
+    // Install All Button
     let install_all_button = Button::new("Install Selezionati", {
         let items = Arc::clone(&items);
         let config = Arc::clone(&config);
@@ -207,7 +202,6 @@ where
         let cb_sink = siv.cb_sink().clone();
         
         move |s| {
-            // Ottieni gli indici degli elementi selezionati
             let selected_indices = {
                 if let Ok(sel) = selection.lock() {
                     sel.get_selected_indices()
@@ -223,7 +217,6 @@ where
                 return;
             }
 
-            // Chiedi conferma
             s.add_layer(Dialog::around(TextView::new(format!("Sei sicuro di voler installare {} elementi selezionati?", 
                                                            selected_indices.len())))
                 .title("Conferma Installazione")
@@ -234,7 +227,6 @@ where
                     let selected_indices = selected_indices.clone();
                     let selection_info = selection_info.clone();
                     let cb_sink = cb_sink.clone();
-                    // Create unique names for each clone to avoid shadowing issues
                     let outer_selection = Arc::clone(&selection);
                     let selection_clone = Arc::clone(&selection);
                     let selection_for_update = Arc::clone(&selection);
@@ -242,7 +234,6 @@ where
                     move |s| {
                         s.pop_layer();
                         
-                        // Mostra una finestra di progresso
                         let progress_text = TextContent::new("Inizializzazione installazione...");
                         let progress_view = Dialog::around(TextView::new_with_content(progress_text.clone()))
                             .title("Installazione in corso")
@@ -251,7 +242,6 @@ where
                         
                         s.add_layer(progress_view);
                         
-                        // Esegui l'operazione su tutti gli elementi selezionati
                         let mut success_count = 0;
                         let mut error_messages = Vec::new();
                         
@@ -273,16 +263,13 @@ where
                                     }
                                 };
                                 
-                                // Verifica la condizione (es: può essere installato)
                                 if !item.can_install() {
                                     continue;
                                 }
                                 
-                                // Aggiorna il messaggio di progresso
                                 progress_text.set_content(format!("Installazione dell'elemento {} ({}/{})...", 
                                                                 item, i+1, selected_indices.len()));
                                 
-                                // Esegui l'operazione
                                 let config_guard = match config.lock() {
                                     Ok(guard) => guard,
                                     Err(e) => {
@@ -300,10 +287,8 @@ where
                             }
                         }
                         
-                        // Rimuovi la finestra di progresso
                         s.pop_layer();
                         
-                        // Mostra il risultato
                         if error_messages.is_empty() {
                             s.add_layer(Dialog::info(format!("Tutti i {} elementi sono stati elaborati con successo", success_count))
                                          .fixed_width(60)
@@ -322,10 +307,7 @@ where
                                 .fixed_height(15));
                         }
                         
-                        // Aggiorna la vista
                         update_ui(&items, &selection_for_update, &selection_info, &cb_sink);
-                        
-                        // Mostra i log recenti
                         log_view::show_recent_logs_popup(s);
                     }
                 })
@@ -334,6 +316,7 @@ where
         }
     });
 
+    // Install Button
     let install_button = Button::new("Install", {
         let items = Arc::clone(&items);
         let config = Arc::clone(&config);
@@ -347,7 +330,6 @@ where
                 _ => return,
             };
 
-            // Ottieni l'elemento selezionato
             let item_result = {
                 let mut items_guard = match items.lock() {
                     Ok(guard) => guard,
@@ -369,7 +351,6 @@ where
                     }
                 };
 
-                // Verifica la condizione
                 if !item.can_install() {
                     s.add_layer(Dialog::info("L'elemento non può essere installato")
                                  .fixed_width(50)
@@ -377,7 +358,6 @@ where
                     return;
                 }
 
-                // Esegui l'operazione
                 let config_guard = match config.lock() {
                     Ok(guard) => guard,
                     Err(e) => {
@@ -391,15 +371,12 @@ where
                 item.install(&config_guard)
             };
 
-            // Gestisci il risultato dell'operazione
             match item_result {
                 Ok(_) => {
                     s.add_layer(Dialog::info("Operazione installazione completata con successo")
                                  .fixed_width(50)
                                  .fixed_height(7));
                     update_ui(&items, &selection, &selection_info, &cb_sink);
-                    
-                    // Mostra i log recenti
                     log_view::show_recent_logs_popup(s);
                 },
                 Err(e) => {
@@ -411,596 +388,7 @@ where
         }
     });
 
-    /*
-    let uninstall_button = Button::new("Uninstall", {
-        let items = Arc::clone(&items);
-        let config = Arc::clone(&config);
-        let selection = Arc::clone(&selection);
-        let selection_info = selection_info.clone();
-        let cb_sink = siv.cb_sink().clone();
-        
-        move |s| {
-            // Check if we have a multi-selection
-            let selected_indices = {
-                if let Ok(sel) = selection.lock() {
-                    sel.get_selected_indices()
-                } else {
-                    vec![]
-                }
-            };
-
-            if !selected_indices.is_empty() {
-                // Disinstallazione per elementi multipli
-                s.add_layer(Dialog::around(TextView::new(format!("Sei sicuro di voler disinstallare {} elementi selezionati?", 
-                                                               selected_indices.len())))
-                    .title("Conferma Disinstallazione")
-                    .button("No", |s| { s.pop_layer(); })
-                    .button("Sì", {
-                        let items = Arc::clone(&items);
-                        let config = Arc::clone(&config);
-                        let selected_indices = selected_indices.clone();
-                        let selection_info = selection_info.clone();
-                        let cb_sink = cb_sink.clone();
-                        let selection_for_update = Arc::clone(&selection);
-                        
-                        move |s| {
-                            s.pop_layer();
-                            
-                            // Mostra una finestra di progresso
-                            let progress_text = TextContent::new("Inizializzazione disinstallazione...");
-                            let progress_view = Dialog::around(TextView::new_with_content(progress_text.clone()))
-                                .title("Disinstallazione in corso")
-                                .fixed_width(60)
-                                .fixed_height(10);
-                            
-                            s.add_layer(progress_view);
-                            
-                            // Esegui l'operazione su tutti gli elementi selezionati
-                            let mut success_count = 0;
-                            let mut error_messages = Vec::new();
-                            
-                            for (i, idx) in selected_indices.iter().enumerate() {
-                                let result = {
-                                    let mut items_guard = match items.lock() {
-                                        Ok(guard) => guard,
-                                        Err(e) => {
-                                            error_messages.push(format!("Errore nel blocco degli elementi: {}", e));
-                                            continue;
-                                        }
-                                    };
-                                    
-                                    let item = match items_guard.get_mut(*idx) {
-                                        Some(item) => item,
-                                        None => {
-                                            error_messages.push(format!("Elemento con indice {} non trovato", idx));
-                                            continue;
-                                        }
-                                    };
-                                    
-                                    // Verifica la condizione
-                                    if !item.can_uninstall() {
-                                        continue;
-                                    }
-                                    
-                                    // Aggiorna il messaggio di progresso
-                                    progress_text.set_content(format!("Disinstallazione dell'elemento {} ({}/{})...", 
-                                                                    item, i+1, selected_indices.len()));
-                                    
-                                    // Esegui l'operazione
-                                    let config_guard = match config.lock() {
-                                        Ok(guard) => guard,
-                                        Err(e) => {
-                                            error_messages.push(format!("Errore nel blocco della configurazione: {}", e));
-                                            continue;
-                                        }
-                                    };
-                                    
-                                    item.uninstall(&config_guard)
-                                };
-                                
-                                match result {
-                                    Ok(_) => success_count += 1,
-                                    Err(e) => error_messages.push(format!("Errore nell'operazione su {}: {}", idx, e)),
-                                }
-                            }
-                            
-                            // Rimuovi la finestra di progresso
-                            s.pop_layer();
-                            
-                            // Mostra il risultato
-                            if error_messages.is_empty() {
-                                s.add_layer(Dialog::info(format!("Tutti i {} elementi sono stati disinstallati con successo", success_count))
-                                             .fixed_width(60)
-                                             .fixed_height(10));
-                            } else {
-                                let mut result_message = format!("Disinstallazioni completate con successo: {}/{}\n\nErrori:\n", 
-                                                              success_count, selected_indices.len());
-                                for error in &error_messages {
-                                    result_message.push_str(&format!("- {}\n", error));
-                                }
-                                
-                                s.add_layer(Dialog::around(TextView::new(result_message).scrollable())
-                                    .title("Risultato Disinstallazione")
-                                    .button("OK", |s| { s.pop_layer(); })
-                                    .fixed_width(70)
-                                    .fixed_height(15));
-                            }
-                            
-                            // Aggiorna la vista
-                            update_ui(&items, &selection_for_update, &selection_info, &cb_sink);
-                            
-                            // Mostra i log recenti
-                            log_view::show_recent_logs_popup(s);
-                        }
-                    })
-                    .fixed_width(60)
-                    .fixed_height(10));
-            } else {
-                // Disinstallazione per singolo elemento
-                let idx = match s.call_on_name("item_list", |view: &mut SelectView<usize>| view.selected_id()) {
-                    Some(Some(idx)) => idx,
-                    _ => return,
-                };
-
-                // Ottieni l'elemento selezionato
-                let item_result = {
-                    let mut items_guard = match items.lock() {
-                        Ok(guard) => guard,
-                        Err(e) => {
-                            s.add_layer(Dialog::info(format!("Errore nel blocco degli elementi: {}", e))
-                                        .fixed_width(50)
-                                        .fixed_height(7));
-                            return;
-                        }
-                    };
-
-                    let item = match items_guard.get_mut(idx) {
-                        Some(item) => item,
-                        None => {
-                            s.add_layer(Dialog::info("Elemento non trovato")
-                                        .fixed_width(50)
-                                        .fixed_height(7));
-                            return;
-                        }
-                    };
-
-                    // Verifica la condizione
-                    if !item.can_uninstall() {
-                        s.add_layer(Dialog::info("L'elemento non può essere disinstallato")
-                                    .fixed_width(50)
-                                    .fixed_height(7));
-                        return;
-                    }
-
-                    // Esegui l'operazione
-                    let config_guard = match config.lock() {
-                        Ok(guard) => guard,
-                        Err(e) => {
-                            s.add_layer(Dialog::info(format!("Errore nel blocco della configurazione: {}", e))
-                                        .fixed_width(50)
-                                        .fixed_height(7));
-                            return;
-                        }
-                    };
-
-                    item.uninstall(&config_guard)
-                };
-
-                // Gestisci il risultato dell'operazione
-                match item_result {
-                    Ok(_) => {
-                        s.add_layer(Dialog::info("Operazione disinstallazione completata con successo")
-                                    .fixed_width(50)
-                                    .fixed_height(7));
-                        update_ui(&items, &selection, &selection_info, &cb_sink);
-                        
-                        // Mostra i log recenti
-                        log_view::show_recent_logs_popup(s);
-                    },
-                    Err(e) => {
-                        s.add_layer(Dialog::info(format!("Errore durante l'operazione disinstallazione: {}", e))
-                                    .fixed_width(50)
-                                    .fixed_height(7));
-                    }
-                }
-            }
-        }
-    });
-    */
-    /*
-    let reset_button = Button::new("Reset", {
-        let items = Arc::clone(&items);
-        let config = Arc::clone(&config);
-        let selection = Arc::clone(&selection);
-        let selection_info = selection_info.clone();
-        let cb_sink = siv.cb_sink().clone();
-        
-        move |s| {
-            // Check if we have a multi-selection
-            let selected_indices = {
-                if let Ok(sel) = selection.lock() {
-                    sel.get_selected_indices()
-                } else {
-                    vec![]
-                }
-            };
-
-            if !selected_indices.is_empty() {
-                // Reset per elementi multipli
-                s.add_layer(Dialog::around(TextView::new(format!("Sei sicuro di voler resettare {} elementi selezionati?", 
-                                                               selected_indices.len())))
-                    .title("Conferma Reset")
-                    .button("No", |s| { s.pop_layer(); })
-                    .button("Sì", {
-                        let items = Arc::clone(&items);
-                        let config = Arc::clone(&config);
-                        let selected_indices = selected_indices.clone();
-                        let selection_info = selection_info.clone();
-                        let cb_sink = cb_sink.clone();
-                        
-                        move |s| {
-                            // Implementazione del reset multiplo
-                            s.pop_layer();
-                            
-                            // Mostra una finestra di progresso
-                            let progress_text = TextContent::new("Inizializzazione reset...");
-                            let progress_view = Dialog::around(TextView::new_with_content(progress_text.clone()))
-                                .title("Reset in corso")
-                                .fixed_width(60)
-                                .fixed_height(10);
-                            
-                            s.add_layer(progress_view);
-                            
-                            // Esegui l'operazione su tutti gli elementi selezionati
-                            let mut success_count = 0;
-                            let mut error_messages = Vec::new();
-                            
-                            for (i, idx) in selected_indices.iter().enumerate() {
-                                let result = {
-                                    let mut items_guard = match items.lock() {
-                                        Ok(guard) => guard,
-                                        Err(e) => {
-                                            error_messages.push(format!("Errore nel blocco degli elementi: {}", e));
-                                            continue;
-                                        }
-                                    };
-                                    
-                                    let item = match items_guard.get_mut(*idx) {
-                                        Some(item) => item,
-                                        None => {
-                                            error_messages.push(format!("Elemento con indice {} non trovato", idx));
-                                            continue;
-                                        }
-                                    };
-                                    
-                                    // Verifica la condizione
-                                    if !item.can_reset() {
-                                        continue;
-                                    }
-                                    
-                                    // Aggiorna il messaggio di progresso
-                                    progress_text.set_content(format!("Reset dell'elemento {} ({}/{})...", 
-                                                                    item, i+1, selected_indices.len()));
-                                    
-                                    // Esegui l'operazione
-                                    let config_guard = match config.lock() {
-                                        Ok(guard) => guard,
-                                        Err(e) => {
-                                            error_messages.push(format!("Errore nel blocco della configurazione: {}", e));
-                                            continue;
-                                        }
-                                    };
-                                    
-                                    item.reset(&config_guard)
-                                };
-                                
-                                match result {
-                                    Ok(_) => success_count += 1,
-                                    Err(e) => error_messages.push(format!("Errore nell'operazione su {}: {}", idx, e)),
-                                }
-                            }
-                            
-                            // Rimuovi la finestra di progresso
-                            s.pop_layer();
-                            
-                            // Mostra il risultato
-                            if error_messages.is_empty() {
-                                s.add_layer(Dialog::info(format!("Tutti i {} elementi sono stati resettati con successo", success_count))
-                                             .fixed_width(60)
-                                             .fixed_height(10));
-                            } else {
-                                let mut result_message = format!("Reset completati con successo: {}/{}\n\nErrori:\n", 
-                                                              success_count, selected_indices.len());
-                                for error in &error_messages {
-                                    result_message.push_str(&format!("- {}\n", error));
-                                }
-                                
-                                s.add_layer(Dialog::around(TextView::new(result_message).scrollable())
-                                    .title("Risultato Reset")
-                                    .button("OK", |s| { s.pop_layer(); })
-                                    .fixed_width(70)
-                                    .fixed_height(15));
-                            }
-                            
-                            // Aggiorna la vista
-                            update_ui(&items, &selection, &selection_info, &cb_sink);
-                            
-                            // Mostra i log recenti
-                            log_view::show_recent_logs_popup(s);
-                        }
-                    })
-                    .fixed_width(60)
-                    .fixed_height(10));
-            } else {
-                // Reset per singolo elemento
-                let idx = match s.call_on_name("item_list", |view: &mut SelectView<usize>| view.selected_id()) {
-                    Some(Some(idx)) => idx,
-                    _ => return,
-                };
-
-                // Ottieni l'elemento selezionato
-                let item_result = {
-                    let mut items_guard = match items.lock() {
-                        Ok(guard) => guard,
-                        Err(e) => {
-                            s.add_layer(Dialog::info(format!("Errore nel blocco degli elementi: {}", e))
-                                        .fixed_width(50)
-                                        .fixed_height(7));
-                            return;
-                        }
-                    };
-
-                    let item = match items_guard.get_mut(idx) {
-                        Some(item) => item,
-                        None => {
-                            s.add_layer(Dialog::info("Elemento non trovato")
-                                        .fixed_width(50)
-                                        .fixed_height(7));
-                            return;
-                        }
-                    };
-
-                    // Verifica la condizione
-                    if !item.can_reset() {
-                        s.add_layer(Dialog::info("L'elemento non può essere resettato")
-                                    .fixed_width(50)
-                                    .fixed_height(7));
-                        return;
-                    }
-
-                    // Esegui l'operazione
-                    let config_guard = match config.lock() {
-                        Ok(guard) => guard,
-                        Err(e) => {
-                            s.add_layer(Dialog::info(format!("Errore nel blocco della configurazione: {}", e))
-                                        .fixed_width(50)
-                                        .fixed_height(7));
-                            return;
-                        }
-                    };
-
-                    item.reset(&config_guard)
-                };
-
-                // Gestisci il risultato dell'operazione
-                match item_result {
-                    Ok(_) => {
-                        s.add_layer(Dialog::info("Operazione reset completata con successo")
-                                    .fixed_width(50)
-                                    .fixed_height(7));
-                        update_ui(&items, &selection, &selection_info, &cb_sink);
-                        
-                        // Mostra i log recenti
-                        log_view::show_recent_logs_popup(s);
-                    },
-                    Err(e) => {
-                        s.add_layer(Dialog::info(format!("Errore durante l'operazione reset: {}", e))
-                                    .fixed_width(50)
-                                    .fixed_height(7));
-                    }
-                }
-            }
-        }
-    });
-    */
-    /*
-    let remediate_button = Button::new("Remediate", {
-        let items = Arc::clone(&items);
-        let config = Arc::clone(&config);
-        let selection = Arc::clone(&selection);
-        let selection_info = selection_info.clone();
-        let cb_sink = siv.cb_sink().clone();
-        
-        move |s| {
-            // Check if we have a multi-selection
-            let selected_indices = {
-                if let Ok(sel) = selection.lock() {
-                    sel.get_selected_indices()
-                } else {
-                    vec![]
-                }
-            };
-
-            if !selected_indices.is_empty() {
-                // Remediate per elementi multipli
-                s.add_layer(Dialog::around(TextView::new(format!("Sei sicuro di voler applicare remediation a {} elementi selezionati?", 
-                                                               selected_indices.len())))
-                    .title("Conferma Remediation")
-                    .button("No", |s| { s.pop_layer(); })
-                    .button("Sì", {
-                        let items = Arc::clone(&items);
-                        let config = Arc::clone(&config);
-                        let selected_indices = selected_indices.clone();
-                        let selection_info = selection_info.clone();
-                        let cb_sink = cb_sink.clone();
-                        
-                        move |s| {
-                            // Implementazione di remediate multiplo
-                            s.pop_layer();
-                            
-                            // Mostra una finestra di progresso
-                            let progress_text = TextContent::new("Inizializzazione remediation...");
-                            let progress_view = Dialog::around(TextView::new_with_content(progress_text.clone()))
-                                .title("Remediation in corso")
-                                .fixed_width(60)
-                                .fixed_height(10);
-                            
-                            s.add_layer(progress_view);
-                            
-                            // Esegui l'operazione su tutti gli elementi selezionati
-                            let mut success_count = 0;
-                            let mut error_messages = Vec::new();
-                            
-                            for (i, idx) in selected_indices.iter().enumerate() {
-                                let result = {
-                                    let mut items_guard = match items.lock() {
-                                        Ok(guard) => guard,
-                                        Err(e) => {
-                                            error_messages.push(format!("Errore nel blocco degli elementi: {}", e));
-                                            continue;
-                                        }
-                                    };
-                                    
-                                    let item = match items_guard.get_mut(*idx) {
-                                        Some(item) => item,
-                                        None => {
-                                            error_messages.push(format!("Elemento con indice {} non trovato", idx));
-                                            continue;
-                                        }
-                                    };
-                                    
-                                    // Verifica la condizione
-                                    if !item.can_remediate() {
-                                        continue;
-                                    }
-                                    
-                                    // Aggiorna il messaggio di progresso
-                                    progress_text.set_content(format!("Remediation dell'elemento {} ({}/{})...", 
-                                                                    item, i+1, selected_indices.len()));
-                                    
-                                    // Esegui l'operazione
-                                    let config_guard = match config.lock() {
-                                        Ok(guard) => guard,
-                                        Err(e) => {
-                                            error_messages.push(format!("Errore nel blocco della configurazione: {}", e));
-                                            continue;
-                                        }
-                                    };
-                                    
-                                    item.remediate(&config_guard)
-                                };
-                                
-                                match result {
-                                    Ok(_) => success_count += 1,
-                                    Err(e) => error_messages.push(format!("Errore nell'operazione su {}: {}", idx, e)),
-                                }
-                            }
-                            
-                            // Rimuovi la finestra di progresso
-                            s.pop_layer();
-                            
-                            // Mostra il risultato
-                            if error_messages.is_empty() {
-                                s.add_layer(Dialog::info(format!("Tutti i {} elementi sono stati rimediati con successo", success_count))
-                                             .fixed_width(60)
-                                             .fixed_height(10));
-                            } else {
-                                let mut result_message = format!("Remediation completate con successo: {}/{}\n\nErrori:\n", 
-                                                              success_count, selected_indices.len());
-                                for error in &error_messages {
-                                    result_message.push_str(&format!("- {}\n", error));
-                                }
-                                
-                                s.add_layer(Dialog::around(TextView::new(result_message).scrollable())
-                                    .title("Risultato Remediation")
-                                    .button("OK", |s| { s.pop_layer(); })
-                                    .fixed_width(70)
-                                    .fixed_height(15));
-                            }
-                            
-                            // Aggiorna la vista
-                            update_ui(&items, &selection, &selection_info, &cb_sink);
-                            
-                            // Mostra i log recenti
-                            log_view::show_recent_logs_popup(s);
-                        }
-                    })
-                    .fixed_width(60)
-                    .fixed_height(10));
-            } else {
-                // Remediate per singolo elemento
-                let idx = match s.call_on_name("item_list", |view: &mut SelectView<usize>| view.selected_id()) {
-                    Some(Some(idx)) => idx,
-                    _ => return,
-                };
-
-                // Ottieni l'elemento selezionato
-                let item_result = {
-                    let mut items_guard = match items.lock() {
-                        Ok(guard) => guard,
-                        Err(e) => {
-                            s.add_layer(Dialog::info(format!("Errore nel blocco degli elementi: {}", e))
-                                        .fixed_width(50)
-                                        .fixed_height(7));
-                            return;
-                        }
-                    };
-
-                    let item = match items_guard.get_mut(idx) {
-                        Some(item) => item,
-                        None => {
-                            s.add_layer(Dialog::info("Elemento non trovato")
-                                        .fixed_width(50)
-                                        .fixed_height(7));
-                            return;
-                        }
-                    };
-
-                    // Verifica la condizione
-                    if !item.can_remediate() {
-                        s.add_layer(Dialog::info("L'elemento non può essere rimediato")
-                                    .fixed_width(50)
-                                    .fixed_height(7));
-                        return;
-                    }
-
-                    // Esegui l'operazione
-                    let config_guard = match config.lock() {
-                        Ok(guard) => guard,
-                        Err(e) => {
-                            s.add_layer(Dialog::info(format!("Errore nel blocco della configurazione: {}", e))
-                                        .fixed_width(50)
-                                        .fixed_height(7));
-                            return;
-                        }
-                    };
-
-                    item.remediate(&config_guard)
-                };
-
-                // Gestisci il risultato dell'operazione
-                match item_result {
-                    Ok(_) => {
-                        s.add_layer(Dialog::info("Operazione remediation completata con successo")
-                                    .fixed_width(50)
-                                    .fixed_height(7));
-                        update_ui(&items, &selection, &selection_info, &cb_sink);
-                        
-                        // Mostra i log recenti
-                        log_view::show_recent_logs_popup(s);
-                    },
-                    Err(e) => {
-                        s.add_layer(Dialog::info(format!("Errore durante l'operazione remediation: {}", e))
-                                    .fixed_width(50)
-                                    .fixed_height(7));
-                    }
-                }
-            }
-        }
-    });
-    */
-
-    // Bottone per pulire la selezione
+    // Clear Selection Button
     let clear_selection_button = {
         let selection = Arc::clone(&selection);
         let items = Arc::clone(&items);
@@ -1017,36 +405,40 @@ where
         })
     };
 
-    // Crea la barra dei pulsanti
-    let buttons = LinearLayout::horizontal()
+    // NUOVO LAYOUT RISTRUTTURATO
+    
+    // 1. Contenitore principale diviso in due parti: lista e dettagli
+    let main_container = LinearLayout::horizontal()
+        .child(Panel::new(select_view_with_events.scrollable().min_size((40, 15)))
+            .title("Elementi")
+            .full_width())
+        .child(DummyView.fixed_width(1))
+        .child(Panel::new(item_detail_view)
+            .title("Dettagli")
+            .full_width());
+    
+    // 2. Barra inferiore con info sulla selezione
+    let selection_bar = LinearLayout::vertical()
+        .child(selection_info_view);
+    
+    // 3. Barra dei pulsanti posizionata orizzontalmente
+    let buttons_bar = LinearLayout::horizontal()
         .child(install_all_button)
         .child(DummyView.fixed_width(1))
         .child(install_button)
         .child(DummyView.fixed_width(1))
-        //.child(uninstall_button)
-        //.child(DummyView.fixed_width(1))
-        //.child(reset_button)
-        //.child(DummyView.fixed_width(1))
-        //.child(remediate_button)
-        //.child(DummyView.fixed_width(1))
         .child(clear_selection_button);
-
-    // Layout principale
+    
+    // 4. Layout principale con allineamento verticale
     let layout = LinearLayout::vertical()
-        .child(Panel::new(select_view_with_events.scrollable())
-            .title("Elementi disponibili")
-            .fixed_width(PANEL_WIDTH)
-            .fixed_height(PANEL_HEIGHT))
-        .child(selection_info_view)
+        .child(main_container)
         .child(DummyView.fixed_height(1))
-        .child(Panel::new(item_detail_view)
-            .title("Dettagli")
-            .fixed_width(PANEL_WIDTH)
-            .fixed_height(10))
+        .child(selection_bar)
         .child(DummyView.fixed_height(1))
-        .child(buttons);
+        .child(Panel::new(buttons_bar)
+            .title("Azioni"));
 
-    // Aggiungi la vista alla UI
+    // Dialog esterno con dimensioni fisse
     siv.add_layer(Dialog::around(layout)
         .title(view_title)
         .button("Log", |s| {
@@ -1055,8 +447,7 @@ where
         .button("Back", |s| {
             s.pop_layer();
         })
-        .fixed_width(WINDOW_WIDTH)
-        .fixed_height(WINDOW_HEIGHT));
+        .full_screen());
 
     Ok(())
 }
